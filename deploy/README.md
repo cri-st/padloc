@@ -1,11 +1,16 @@
 # Deploy (pre-built images)
 
 Deploys Padloc using the two images published by
-`.github/workflows/docker-publish.yml` to Docker Hub — the only things this
-CI builds are:
+`.github/workflows/docker-publish.yml` to the **GitHub Container Registry**
+(ghcr.io) — the only things this CI builds are:
 
--   `<DOCKERHUB_USERNAME>/padloc-server` — API/backend (`Dockerfile-server`)
--   `<DOCKERHUB_USERNAME>/padloc-pwa` — web app build (`Dockerfile-pwa`)
+-   `ghcr.io/<owner>/padloc-server` — API/backend (`Dockerfile-server`)
+-   `ghcr.io/<owner>/padloc-pwa` — web app build (`Dockerfile-pwa`)
+
+No Docker Hub, no manual registry token for CI: the workflow authenticates
+with the built-in `GITHUB_TOKEN`, granted push access via `permissions:
+packages: write` in the workflow file itself. Nothing to configure in repo
+secrets.
 
 Everything else in `docker-compose.yml` (`db`, `nginx`, `cloudflared`) is a
 **stock, unmodified image** configured entirely through env vars / inline
@@ -22,14 +27,17 @@ command in this file — nothing custom to build or maintain for them:
 
 ## One-time setup
 
-1. On GitHub: **Settings -> Secrets and variables -> Actions**, add:
-    - `DOCKERHUB_USERNAME` — your Docker Hub username/namespace
-    - `DOCKERHUB_TOKEN` — a Docker Hub access token (Docker Hub -> Account
-      Settings -> Security -> New Access Token)
-2. Push to `main` (touching `Dockerfile-server`, `Dockerfile-pwa`,
+1. Push to `main` (touching `Dockerfile-server`, `Dockerfile-pwa`,
    `packages/server/**`, `packages/pwa/**`, etc.) or run
    `docker-publish.yml` manually from the Actions tab. This builds and
-   pushes both images.
+   pushes both images — no secrets to add first.
+2. GHCR packages default to **private**, even in a public repo. Pick one:
+    - Make them public: on GitHub, go to the package page
+      (`github.com/<owner>?tab=packages`) -> package -> **Package settings**
+      -> **Change visibility** -> Public. Do this for both `padloc-server`
+      and `padloc-pwa`. Then `docker compose pull` needs no auth at all.
+    - Or keep them private and authenticate the deploy host once:
+      `docker login ghcr.io -u <github-username> -p <PAT with read:packages>`
 3. Create a Cloudflare Tunnel and point it at this stack (run once, from
    anywhere with `cloudflared` + `cloudflare login`):
     ```sh
@@ -45,7 +53,8 @@ command in this file — nothing custom to build or maintain for them:
 ```sh
 cd deploy
 cp .env.example .env
-# edit .env: DOCKERHUB_USERNAME, PL_HOSTNAME, postgres/email creds, CF_TUNNEL_TOKEN
+# edit .env: GHCR_OWNER (your GitHub username/org, lowercase), PL_HOSTNAME,
+# postgres/email creds, CF_TUNNEL_TOKEN
 
 docker compose pull
 docker compose up -d

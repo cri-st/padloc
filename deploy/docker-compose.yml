@@ -30,7 +30,7 @@ services:
 
   server:
 
-    image: ${DOCKERHUB_USERNAME:?set DOCKERHUB_USERNAME in .env}/padloc-server:${IMAGE_TAG:-latest}
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER in .env}/padloc-server:${IMAGE_TAG:-latest}
 
     restart: unless-stopped
 
@@ -73,7 +73,7 @@ services:
 
   pwa:
 
-    image: ${DOCKERHUB_USERNAME:?set DOCKERHUB_USERNAME in .env}/padloc-pwa:${IMAGE_TAG:-latest}
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER in .env}/padloc-pwa:${IMAGE_TAG:-latest}
 
     restart: on-failure
 
