@@ -1,0 +1,83 @@
+name: Docker Publish
+
+# Builds the two self-hosted Padloc images (server + pwa) and pushes them to
+# Docker Hub. Mirrors .forgejo/workflows/update-dockerhub.yml but runs on
+# GitHub Actions.
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions):
+#   DOCKERHUB_USERNAME  Docker Hub username/namespace to publish under
+#   DOCKERHUB_TOKEN     Docker Hub access token (Account Settings -> Security)
+#
+# Images are published as:
+#   <DOCKERHUB_USERNAME>/padloc-server:latest / :<short-sha> / :<tag>
+#   <DOCKERHUB_USERNAME>/padloc-pwa:latest    / :<short-sha> / :<tag>
+
+on:
+    push:
+        branches:
+            - main
+        paths:
+            - ".github/workflows/docker-publish.yml"
+            - "Dockerfile-pwa"
+            - "Dockerfile-server"
+            - "package.json"
+            - "package-lock.json"
+            - "packages/*/package.json"
+            - "packages/*/package-lock.json"
+            - "packages/pwa/**"
+            - "packages/server/**"
+            - "packages/app/**"
+            - "packages/core/**"
+            - "packages/locale/**"
+            - "assets/**"
+    workflow_dispatch:
+        inputs:
+            tag:
+                description: "Extra tag to publish (e.g. v1.2.3)"
+                required: false
+                default: ""
+
+jobs:
+    build-and-push:
+        name: Build and push (${{ matrix.name }})
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                include:
+                    - name: server
+                      dockerfile: Dockerfile-server
+                    - name: pwa
+                      dockerfile: Dockerfile-pwa
+        steps:
+            - name: Check out the repo
+              uses: actions/checkout@v4
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to Docker Hub
+              uses: docker/login-action@v3
+              with:
+                  username: ${{ secrets.DOCKERHUB_USERNAME }}
+                  password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+            - name: Extract metadata (tags/labels)
+              id: meta
+              uses: docker/metadata-action@v5
+              with:
+                  images: ${{ secrets.DOCKERHUB_USERNAME }}/padloc-${{ matrix.name }}
+                  tags: |
+                      type=raw,value=latest,enable={{is_default_branch}}
+                      type=sha,format=short
+                      type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
+
+            - name: Build and push
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  file: ${{ matrix.dockerfile }}
+                  push: true
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}
+                  cache-from: type=gha,scope=${{ matrix.name }}
+                  cache-to: type=gha,mode=max,scope=${{ matrix.name }}

@@ -1,0 +1,65 @@
+# Production deploy compose file. Unlike the root docker-compose.yml (which
+# BUILDS the images locally), this one PULLS the images published by
+# .github/workflows/docker-publish.yml — nothing is built on the host.
+#
+# Usage:
+#   cp .env.example .env   # fill in DOCKERHUB_USERNAME, PL_HOSTNAME, email, etc.
+#   docker compose pull
+#   docker compose up -d
+
+services:
+    server:
+        image: ${DOCKERHUB_USERNAME:?set DOCKERHUB_USERNAME in .env}/padloc-server:${IMAGE_TAG:-latest}
+        environment:
+            PL_DATA_BACKEND: leveldb
+            PL_DATA_LEVELDB_DIR: /data
+            PL_DATA_ATTACHMENTS_BACKEND: fs
+            PL_DATA_ATTACHMENTS_DIR: /attachments
+            PL_SERVER_CLIENT_URL: https://${PL_HOSTNAME}
+            PL_ADMIN_EMAIL: ${PL_ADMIN_EMAIL}
+            PL_EMAIL_BACKEND: ${PL_EMAIL_BACKEND:-smtp}
+            PL_EMAIL_SMTP_HOST: ${PL_EMAIL_SMTP_HOST}
+            PL_EMAIL_SMTP_PORT: ${PL_EMAIL_SMTP_PORT:-587}
+            PL_EMAIL_SMTP_USER: ${PL_EMAIL_SMTP_USER}
+            PL_EMAIL_SMTP_PASSWORD: ${PL_EMAIL_SMTP_PASSWORD}
+            PL_EMAIL_SMTP_FROM: ${PL_EMAIL_SMTP_FROM}
+        expose:
+            - 3000
+        volumes:
+            - data:/data
+            - attachments:/attachments
+        restart: unless-stopped
+    pwa:
+        image: ${DOCKERHUB_USERNAME:?set DOCKERHUB_USERNAME in .env}/padloc-pwa:${IMAGE_TAG:-latest}
+        environment:
+            PL_SERVER_URL: https://${PL_HOSTNAME}/server
+            PL_PWA_URL: https://${PL_HOSTNAME}
+        # "build" runs the webpack build once into the shared /pwa volume and
+        # exits; caddy serves the static output directly (no running pwa
+        # server needed in production).
+        command: ["build"]
+        volumes:
+            - pwa:/pwa
+        restart: on-failure
+    caddy:
+        image: caddy:2
+        depends_on:
+            - server
+        environment:
+            PL_HOSTNAME: ${PL_HOSTNAME}
+        volumes:
+            - pwa:/pwa
+            - ./Caddyfile:/etc/caddy/Caddyfile
+            - caddy_data:/data
+            - caddy_config:/config
+        ports:
+            - "80:80"
+            - "443:443"
+        restart: always
+
+volumes:
+    data:
+    attachments:
+    pwa:
+    caddy_data:
+    caddy_config:
