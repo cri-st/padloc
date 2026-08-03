@@ -1,65 +1,218 @@
-# Production deploy compose file. Unlike the root docker-compose.yml (which
-# BUILDS the images locally), this one PULLS the images published by
-# .github/workflows/docker-publish.yml — nothing is built on the host.
-#
-# Usage:
-#   cp .env.example .env   # fill in DOCKERHUB_USERNAME, PL_HOSTNAME, email, etc.
-#   docker compose pull
-#   docker compose up -d
+# Production deploy compose file — pulls the two images published by
+# .github/workflows/docker-publish.yml (padloc-server, padloc-pwa). Nothing
+# else is built: db/nginx/cloudflared are stock images configured entirely
+# here. Reverse-proxy + edge exposure live in THIS file on purpose, so they
+# can change without touching the CI build.
 
 services:
-    server:
-        image: ${DOCKERHUB_USERNAME:?set DOCKERHUB_USERNAME in .env}/padloc-server:${IMAGE_TAG:-latest}
-        environment:
-            PL_DATA_BACKEND: leveldb
-            PL_DATA_LEVELDB_DIR: /data
-            PL_DATA_ATTACHMENTS_BACKEND: fs
-            PL_DATA_ATTACHMENTS_DIR: /attachments
-            PL_SERVER_CLIENT_URL: https://${PL_HOSTNAME}
-            PL_ADMIN_EMAIL: ${PL_ADMIN_EMAIL}
-            PL_EMAIL_BACKEND: ${PL_EMAIL_BACKEND:-smtp}
-            PL_EMAIL_SMTP_HOST: ${PL_EMAIL_SMTP_HOST}
-            PL_EMAIL_SMTP_PORT: ${PL_EMAIL_SMTP_PORT:-587}
-            PL_EMAIL_SMTP_USER: ${PL_EMAIL_SMTP_USER}
-            PL_EMAIL_SMTP_PASSWORD: ${PL_EMAIL_SMTP_PASSWORD}
-            PL_EMAIL_SMTP_FROM: ${PL_EMAIL_SMTP_FROM}
-        expose:
-            - 3000
-        volumes:
-            - data:/data
-            - attachments:/attachments
-        restart: unless-stopped
-    pwa:
-        image: ${DOCKERHUB_USERNAME:?set DOCKERHUB_USERNAME in .env}/padloc-pwa:${IMAGE_TAG:-latest}
-        environment:
-            PL_SERVER_URL: https://${PL_HOSTNAME}/server
-            PL_PWA_URL: https://${PL_HOSTNAME}
-        # "build" runs the webpack build once into the shared /pwa volume and
-        # exits; caddy serves the static output directly (no running pwa
-        # server needed in production).
-        command: ["build"]
-        volumes:
-            - pwa:/pwa
-        restart: on-failure
-    caddy:
-        image: caddy:2
-        depends_on:
-            - server
-        environment:
-            PL_HOSTNAME: ${PL_HOSTNAME}
-        volumes:
-            - pwa:/pwa
-            - ./Caddyfile:/etc/caddy/Caddyfile
-            - caddy_data:/data
-            - caddy_config:/config
-        ports:
-            - "80:80"
-            - "443:443"
-        restart: always
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${PL_DATA_POSTGRES_DATABASE}
+      POSTGRES_USER: ${PL_DATA_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${PL_DATA_POSTGRES_PASSWORD}
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PL_DATA_POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    volumes:
+      - postgres:/var/lib/postgresql/data
+
+    networks:
+      - padloc
+
+
+  server:
+
+    image: ${DOCKERHUB_USERNAME:?set DOCKERHUB_USERNAME in .env}/padloc-server:${IMAGE_TAG:-latest}
+
+    restart: unless-stopped
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    environment:
+
+      PL_DATA_BACKEND: postgres
+
+      PL_DATA_POSTGRES_HOST: db
+      PL_DATA_POSTGRES_PORT: 5432
+      PL_DATA_POSTGRES_DATABASE: ${PL_DATA_POSTGRES_DATABASE}
+      PL_DATA_POSTGRES_USER: ${PL_DATA_POSTGRES_USER}
+      PL_DATA_POSTGRES_PASSWORD: ${PL_DATA_POSTGRES_PASSWORD}
+
+      PL_DATA_ATTACHMENTS_BACKEND: fs
+      PL_DATA_ATTACHMENTS_DIR: /attachments
+
+      PL_SERVER_CLIENT_URL: https://${PL_HOSTNAME}
+      PL_SERVER_REPORT_ERRORS: ${PL_ADMIN_EMAIL}
+
+      PL_EMAIL_BACKEND: ${PL_EMAIL_BACKEND}
+      PL_EMAIL_SMTP_HOST: ${PL_EMAIL_SMTP_HOST}
+      PL_EMAIL_SMTP_PORT: ${PL_EMAIL_SMTP_PORT}
+      PL_EMAIL_SMTP_USER: ${PL_EMAIL_SMTP_USER}
+      PL_EMAIL_SMTP_PASSWORD: ${PL_EMAIL_SMTP_PASSWORD}
+      PL_EMAIL_SMTP_FROM: ${PL_EMAIL_SMTP_FROM}
+
+    expose:
+      - "3000"
+
+    volumes:
+      - attachments:/attachments
+
+    networks:
+      - padloc
+
+
+  pwa:
+
+    image: ${DOCKERHUB_USERNAME:?set DOCKERHUB_USERNAME in .env}/padloc-pwa:${IMAGE_TAG:-latest}
+
+    restart: on-failure
+
+    # Runs `npm run build` (webpack) INSIDE the container on every start —
+    # PL_SERVER_URL/PL_PWA_URL get baked into the bundle at this point, then
+    # the container exits (expected, not a crash). Re-run
+    # `docker compose up -d --force-recreate pwa` after changing either var.
+    command: ["build"]
+
+    environment:
+      PL_PWA_DIR: /pwa
+      PL_SERVER_URL: https://${PL_HOSTNAME}/server
+      PL_PWA_URL: https://${PL_HOSTNAME}
+      PL_PWA_PORT: 443
+
+    volumes:
+      - pwa:/pwa
+
+    networks:
+      - padloc
+
+
+  nginx:
+
+    image: nginx:alpine
+
+    restart: unless-stopped
+
+    depends_on:
+      - server
+      - pwa
+
+    expose:
+      - "80"
+
+    volumes:
+      - pwa:/pwa:ro
+
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat >/etc/nginx/nginx.conf <<'EOF'
+        user nginx;
+        worker_processes auto;
+
+        events {}
+
+        http {
+
+          sendfile on;
+          tcp_nopush on;
+          tcp_nodelay on;
+          keepalive_timeout 65;
+
+          types_hash_max_size 2048;
+
+          client_max_body_size 10m;
+
+          gzip on;
+          gzip_types
+            text/plain
+            text/css
+            application/json
+            application/javascript
+            text/xml
+            application/xml
+            application/xml+rss
+            text/javascript;
+
+          include /etc/nginx/mime.types;
+
+          add_header X-Frame-Options deny;
+
+          server {
+
+            listen 80;
+            server_name _;
+
+            location /server {
+
+              resolver 127.0.0.11 valid=60s;
+
+              set $$server "http://server:3000";
+
+              proxy_pass $$server;
+
+              proxy_set_header Host $$host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Host $$host;
+              proxy_set_header X-Forwarded-Proto https;
+
+            }
+
+            location / {
+
+              root /pwa;
+
+              index index.html;
+
+              try_files $$uri /index.html;
+
+            }
+
+          }
+
+        }
+        EOF
+
+        exec nginx -g 'daemon off;'
+
+    networks:
+      - padloc
+
+
+  cloudflared:
+
+    image: cloudflare/cloudflared:latest
+
+    restart: unless-stopped
+
+    depends_on:
+      - nginx
+
+    command: tunnel --no-autoupdate run
+
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN}
+
+    networks:
+      - padloc
+
 
 volumes:
-    data:
-    attachments:
-    pwa:
-    caddy_data:
-    caddy_config:
+  postgres:
+  attachments:
+  pwa:
+
+networks:
+  padloc:
+    driver: bridge
