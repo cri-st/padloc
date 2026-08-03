@@ -31,6 +31,7 @@ services:
   server:
 
     image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER in .env}/padloc-server:${IMAGE_TAG:-latest}
+    pull_policy: always
 
     restart: unless-stopped
 
@@ -74,6 +75,7 @@ services:
   pwa:
 
     image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER in .env}/padloc-pwa:${IMAGE_TAG:-latest}
+    pull_policy: always
 
     restart: on-failure
 
