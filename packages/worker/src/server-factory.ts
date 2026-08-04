@@ -7,6 +7,7 @@ import { EmailAuthServer } from "@padloc/core/src/auth/email";
 import { TotpAuthConfig, TotpAuthServer } from "@padloc/core/src/auth/totp";
 import { AttachmentStorage } from "@padloc/core/src/attachment";
 import { Messenger } from "@padloc/core/src/messenger";
+import { Err, ErrorCode } from "@padloc/core/src/error";
 import { ChangeLogger } from "@padloc/core/src/logging";
 import { RequestLogger } from "@padloc/core/src/logging";
 import { ChangeLoggerConfig } from "@padloc/core/src/logging";
@@ -80,8 +81,11 @@ function createMessenger(env: Env): Messenger {
         console.log("[createMessenger] using ResendMessenger");
         return new ResendMessenger(env.RESEND_API_KEY, env.EMAIL_FROM_ADDRESS);
     }
-    console.warn("[createMessenger] falling back to MockMessenger");
-    return sharedMockMessenger;
+    throw new Err(
+        ErrorCode.SERVER_ERROR,
+        "Email backend misconfigured: RESEND_API_KEY/EMAIL_FROM_ADDRESS missing and EMAIL_BACKEND is not 'mock'",
+        { report: true }
+    );
 }
 
 function createAttachmentStorage(env: Env): AttachmentStorage {

@@ -89,7 +89,17 @@ export default {
         }
 
         if (!cachedServer) {
-            cachedServer = createServer(env);
+            try {
+                cachedServer = createServer(env);
+            } catch (error) {
+                captureHqException(error, requestAttributes(request));
+                return new Response(JSON.stringify({ error: "server_misconfigured" }), {
+                    status: 503,
+                    headers: responseHeaders({ allowOrigin }, undefined, {
+                        "Content-Type": "application/json; charset=utf-8",
+                    }),
+                });
+            }
         }
         const server = cachedServer;
 
