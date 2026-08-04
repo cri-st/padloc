@@ -6,7 +6,17 @@
  *   2. Session expiry blocks request
  *   3. Replay/old timestamp rejected
  *   4. Concurrent requests serialized by AccountLockDO
- *   5. Rate-limit KV staleness does not bypass D1 auth row
+ *
+ * Note: this file previously included a "Rate-limit KV staleness does not
+ * bypass D1 auth row" test that only exercised locally-reimplemented mock
+ * stand-ins (never the real worker/src/session.ts module, which itself was
+ * dead code -- never imported anywhere, and its readAuthThrottle() query
+ * referenced a failed_attempts column that didn't exist in the live D1
+ * schema). That dead module has been removed. Real, end-to-end persistent
+ * account-lockout coverage -- through the actual Server.completeCreateSession
+ * path and Auth.failedLoginAttempts/lockedUntil fields, via a real wrangler
+ * dev instance -- now lives in test:account-lockout-e2e
+ * (test/account-lockout-e2e.worker.ts + test/run-account-lockout-e2e.mjs).
  *
  * Run: node --experimental-vm-modules test/session-contract.test.mjs
  */
@@ -181,64 +191,6 @@ async function testSortedIdOrdering() {
     assert(JSON.stringify(ids1) === JSON.stringify(ids2), "Two different input orders produce identical sorted order");
 }
 
-// ─── Rate Limit Tests ──────────────────────────────────────────────────────
-
-async function testCannotBypassViaKVStaleness() {
-    console.log("\n[Rate Limit — KV Staleness]");
-
-    const kvStore = new Map();
-
-    async function incrementRateWindow(ip, route, ttlSeconds) {
-        const key = `rate:${ip}:${route}`;
-        const raw = kvStore.get(key);
-        const current = raw ? JSON.parse(raw) : null;
-        const now = new Date();
-
-        const isNew = !current || now.getTime() - new Date(current.windowStart).getTime() > ttlSeconds * 1000;
-
-        const next = {
-            count: isNew ? 1 : current.count + 1,
-            windowStart: isNew ? now.toISOString() : current.windowStart,
-        };
-        kvStore.set(key, JSON.stringify(next));
-        return next.count;
-    }
-
-    const d1Auth = { failed_attempts: 10 };
-
-    async function checkRateLimit(ip, route, accountId) {
-        const kvCount = await incrementRateWindow(ip, route, 60);
-        if (kvCount > 100 && accountId) {
-            if (d1Auth.failed_attempts >= 5) {
-                throw new Error("Account temporarily locked");
-            }
-        }
-        if (kvCount > 200) {
-            throw new Error("Too many requests");
-        }
-    }
-
-    let blocked = false;
-    try {
-        for (let i = 0; i < 200; i++) {
-            await checkRateLimit("1.2.3.4", "/login", "acct1");
-        }
-    } catch {
-        blocked = true;
-    }
-    assert(blocked, "Rate limit enforced even if KV would stale out");
-
-    d1Auth.failed_attempts = 0;
-    let bypassed = false;
-    kvStore.clear();
-    try {
-        await checkRateLimit("1.2.3.4", "/login", "acct1");
-    } catch {
-        bypassed = true;
-    }
-    assert(!bypassed, "Request passes when both KV and D1 are below thresholds");
-}
-
 // ─── Sorted ID Order Prevention of Deadlock ───────────────────────────────
 
 async function testNoDeadlockWithOverlap() {
@@ -299,7 +251,6 @@ async function testNoDeadlockWithOverlap() {
     await testValidSessionPasses();
     await testConcurrentSerialization();
     await testSortedIdOrdering();
-    await testCannotBypassViaKVStaleness();
     await testNoDeadlockWithOverlap();
 
     console.log(`\nResults: ${passed} passed, ${failed} failed`);
