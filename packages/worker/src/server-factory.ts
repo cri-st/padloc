@@ -13,6 +13,7 @@ import { RequestLogger } from "@padloc/core/src/logging";
 import { ChangeLoggerConfig } from "@padloc/core/src/logging";
 import { RequestLoggerConfig } from "@padloc/core/src/logging";
 import { setPlatform } from "@padloc/core/src/platform";
+import { setAppNameOverride } from "@padloc/core/src/branding";
 import { D1Storage } from "./storage/d1";
 import { PersonalProvisioner } from "./provisioner/personal";
 import { R2AttachmentStorage } from "./attachments/r2";
@@ -22,6 +23,7 @@ import { Env } from "./env";
 
 export function createServer(env: Env): Server {
     setPlatform(new WorkerPlatform());
+    setAppNameOverride(env.APP_NAME);
 
     const storage: Storage = env.DB ? new D1Storage(env.DB) : createStubStorage();
     const logger: Logger = new VoidLogger();

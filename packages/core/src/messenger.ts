@@ -1,12 +1,9 @@
-import { APP_NAME } from "./branding";
+import { APP_NAME, resolveAppName } from "./branding";
 
 export type MessageData = { [param: string]: string };
 
 function getAppName(defaultName = APP_NAME) {
-    if (typeof process !== "undefined" && process.env?.PL_APP_NAME) {
-        return process.env.PL_APP_NAME;
-    }
-    return defaultName;
+    return resolveAppName(defaultName);
 }
 
 /**
