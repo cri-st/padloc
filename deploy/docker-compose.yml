@@ -55,6 +55,11 @@ services:
       PL_SERVER_CLIENT_URL: https://${PL_HOSTNAME}
       PL_SERVER_REPORT_ERRORS: ${PL_ADMIN_EMAIL}
 
+      # rpID/origin for WebAuthn are auto-derived from PL_SERVER_CLIENT_URL
+      # when unset -- no extra PL_AUTH_WEBAUTHN_* vars needed as long as
+      # PL_HOSTNAME is the exact domain the browser loads the PWA from.
+      PL_AUTH_TYPES: ${PL_AUTH_TYPES:-email,totp,webauthn_platform,webauthn_portable}
+
       PL_EMAIL_BACKEND: ${PL_EMAIL_BACKEND}
       PL_EMAIL_SMTP_HOST: ${PL_EMAIL_SMTP_HOST}
       PL_EMAIL_SMTP_PORT: ${PL_EMAIL_SMTP_PORT}
