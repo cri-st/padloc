@@ -51,7 +51,7 @@ mirroring the self-host pattern. Keep raw substitution only for `*_txt` template
 
 ## 2. High
 
-### 2.1 The account-lockout / D1-authoritative-session subsystem is dead code
+### 2.1 The account-lockout / D1-authoritative-session subsystem is dead code — **FIXED 2026-08-04**
 **`packages/worker/src/session.ts` (whole file), `storage/schema.ts:54-70`**
 
 `resolveSession`, `checkRateLimit`, `readAuthThrottle` exist with doc comments
@@ -104,8 +104,8 @@ status.
 |---|---|---|---|
 | 3.1 | DOMPurify resolved to **2.4.1** (app pins `^2.3.3`, server pins `2.3.8`) at both call sites with **no `ALLOWED_TAGS`/`ALLOWED_ATTR` restriction** (only additive `ADD_TAGS`/`ADD_ATTR`), rendering stored markdown/rich-content via `unsafeHTML`. This version predates ~2 years and dozens of disclosed DOMPurify XSS/mXSS/prototype-pollution bypasses (fixed through the current 3.4.x line — see the `npm audit` advisory list in this repo's history). Not a demonstrated bypass today, but it maximizes exposure to any future or already-fixed-upstream bypass. | `packages/app/src/lib/markdown.ts:86`, `elements/rich-content.ts:41-42` | production PWA, shared vault notes |
 | 3.2 | ~~Reverse tabnabbing~~ — **FIXED 2026-08-04**: `WebPlatform.openExternalUrl()` calls `window.open(url, "_blank")` **without `noopener`**. Every link inside rendered markdown (shared vault note fields, editable by any org member) routes through this. A malicious link opens with a live `window.opener`, letting the new tab redirect the original authenticated Padloc tab to a phishing/credential page. The DOMPurify `afterSanitizeAttributes` hook forces `target="_blank"` on links but never pairs it with `rel="noopener noreferrer"`, compounding this. | `packages/app/src/lib/platform.ts:177-179`, `lib/markdown.ts:73-79` | production PWA |
-| 3.3 | `Session.expires` is defined but **never set** by `completeCreateSession` (`core/src/server.ts:667-703`); the only real lifecycle control is a 14-day **idle-timeout** sweep, not an absolute cap. A session used at least once every 14 days is valid forever. Raises blast radius of any session-key exfiltration (e.g. via 3.1/3.2). | `core/src/session.ts:87-182`, `core/src/server.ts:196-199,2049-2075` | production worker + self-host (shared core) |
-| 3.4 | WebAuthn signature counter is persisted **before** the `verified` check — a failed/replayed assertion can still corrupt the stored clone-detection baseline. Self-host only; the Worker doesn't register `WebAuthnServer` at all (only Email + TOTP), so `pad.ch5.me` isn't affected. | `packages/server/src/auth/webauthn.ts:171-188` | self-host Docker only |
+| 3.3 | ~~`Session.expires` never set~~ — **FIXED 2026-08-04**: was defined but **never set** by `completeCreateSession` (`core/src/server.ts:667-703`); the only real lifecycle control was a 14-day **idle-timeout** sweep, not an absolute cap. A session used at least once every 14 days was valid forever. Raised blast radius of any session-key exfiltration (e.g. via 3.1/3.2). | `core/src/session.ts:87-182`, `core/src/server.ts:196-199,2049-2075` | production worker + self-host (shared core) |
+| 3.4 | ~~WebAuthn counter persisted before verify~~ — **FIXED 2026-08-04**: signature counter was persisted **before** the `verified` check — a failed/replayed assertion could corrupt the stored clone-detection baseline. Self-host only; the Worker doesn't register `WebAuthnServer` at all (only Email + TOTP), so `pad.ch5.me` was never affected. | `packages/server/src/auth/webauthn.ts:171-188` | self-host Docker only |
 | 3.5 | Production brute-force protection is a **single global per-IP rate limit** (100 req/60s, uniform across all routes, not login-specific), and it **fails open** if the KV binding is unavailable ("prevents the limiter from becoming a single point of failure" — by design, but that design choice means auth endpoints get zero protection during a KV outage). Combined with 2.1 being dead, there is no real per-account throttling for password/TOTP guessing in production. | `packages/worker/src/rate-limiter.ts:1-49`, `transport.ts:109-121` | production worker |
 
 ---
@@ -114,8 +114,8 @@ status.
 
 - **`observability/log-redaction.ts` is dead code** — a full field-redaction module exists but has zero callers anywhere in `packages/worker/src`; the "logging-redaction" test only checks two narrow, already-safe call sites and never invokes the module itself. Today nothing leaks, but the module *implies* a guardrail that isn't wired in — the next `console.log(rawRequest)` added for debugging would bypass it silently. (`packages/worker/src/observability/log-redaction.ts`)
 - **`AccountLockDO` is a concurrency mutex, not a lockout control**, despite the name and its Durable Object binding in `wrangler.toml` inviting the opposite conclusion. It's also unwired (nothing calls `withAccountLocks`). Rename to avoid misleading future audits. (`packages/worker/src/locks/account-lock.ts`)
-- **`ALLOW_ORIGIN` falls back to `"*"` with no environment-aware guard** (`index.ts:66-69`). Safe today only because `wrangler.toml` correctly scopes staging/production — there's no assertion preventing a future config edit from silently reopening CORS on a password manager API.
-- **Non-timing-safe `===` comparison** for one-time auth tokens (`core/src/server.ts:2136-2143`), inconsistent with `timingSafeEqual` used elsewhere for SRP/TOTP. Low practical risk (128-bit CSPRNG token) but bad precedent.
+- ~~`ALLOW_ORIGIN` falls back to `"*"` with no environment-aware guard~~ — **FIXED 2026-08-04**: `index.ts` now refuses to serve (clean 503) if `HQ_ENVIRONMENT` is `production`/`staging` and `ALLOW_ORIGIN` resolves to `"*"`.
+- ~~Non-timing-safe `===` comparison~~ for one-time auth tokens — **FIXED 2026-08-04**: `core/src/server.ts`'s `_useAuthToken` now uses `getCryptoProvider().timingSafeEqual()`, matching the pattern already used for SRP/TOTP.
 - **D1 queries build table names via template-literal interpolation** instead of the drizzle-orm query builder API. Currently safe — `tableFor()` enforces a closed whitelist that throws on unknown input — but it's an anti-pattern that would become exploitable if that whitelist were ever loosened. (`packages/worker/src/storage/d1.ts:175-276`)
 - **Extension popup writes `error.message` into `document.body.innerHTML`** unescaped on startup failure (`packages/extension/src/popup.ts:10-17`). No confirmed attacker-controlled propagation into that specific `.message` was found, but it's a footgun in a higher-privilege surface.
 
@@ -159,12 +159,12 @@ This is the one area where "3 years abandoned" did **not** rot the design — th
 3. ✅ **FIXED** Fix 3.2 (reverse tabnabbing) — `WebPlatform.openExternalUrl()` now passes `"noopener,noreferrer"` to `window.open`; the DOMPurify `afterSanitizeAttributes` hook in `markdown.ts` now sets `rel="noopener noreferrer"` alongside `target="_blank"`.
 
 **Phase 1 — next 1–2 weeks:**
-4. Resolve 2.1: wire the real per-account lockout (add `failed_attempts` column, increment/reset logic, call it from `transport.ts`) **or** delete the dead module — either way, rewrite `session-contract.test.mjs` to import and exercise the real code so CI can't lie about this again.
-5. Bump `dompurify` to current 3.x in `app` and `server`; add an explicit `ALLOWED_TAGS`/`ALLOWED_ATTR` allowlist scoped to what markdown actually needs.
-6. Set `session.expires` to an absolute cap (e.g. 30–90 days) in `completeCreateSession`, independent of the idle-timeout sweep.
-7. Fix WebAuthn counter-before-verify ordering (self-host).
-8. Add a startup assertion: refuse to serve if `HQ_ENVIRONMENT` is `production`/`staging` and `ALLOW_ORIGIN` is unset or `"*"`.
-9. Swap the auth-token `===` to `timingSafeEqual`.
+4. ✅ **FIXED** Resolve 2.1: implemented a real persistent per-account lockout — **without a D1 schema migration**, by adding `Auth.failedLoginAttempts`/`Auth.lockedUntil` fields (serialized in the existing opaque `data` blob column, so it works identically for D1 and self-host storages) instead of the old dead module's raw-SQL approach. `completeCreateSession` now checks/increments/resets these fields, locking the account for 15 minutes after 10 persistent failed password attempts — this survives fresh SRP sessions, closing the exact loophole the per-session-only `SRPSession.failedAttempts`/`AuthRequest.tries` counters left open. Deleted the dead `packages/worker/src/session.ts` module entirely (zero real importers, confirmed). Rewrote `session-contract.test.mjs` to remove the fake KV/D1-mock rate-limit test and added a genuine end-to-end test (`test/account-lockout-e2e.worker.ts` + `test/run-account-lockout-e2e.mjs`, wired into `test:ci`) that drives real SRP logins against a real wrangler dev + D1 instance, proving an attacker can't bypass the lockout by requesting a fresh session per guess, and that the correct password is also rejected once locked.
+5. ✅ **FIXED** Bump `dompurify` to current 3.x in `app` and `server`; add an explicit `ALLOWED_TAGS`/`ALLOWED_ATTR` allowlist scoped to what markdown actually needs. (Shipped in the same batch as items 6/7/8/9 below.)
+6. ✅ **FIXED** Set `session.expires` to an absolute 90-day cap in `completeCreateSession`, independent of the idle-timeout sweep.
+7. ✅ **FIXED** Fix WebAuthn counter-before-verify ordering (self-host).
+8. ✅ **FIXED** Add a startup assertion: refuse to serve if `HQ_ENVIRONMENT` is `production`/`staging` and `ALLOW_ORIGIN` is unset or `"*"`.
+9. ✅ **FIXED** Swap the auth-token `===` to `timingSafeEqual`.
 
 **Phase 2 — hardening & prevent re-rot:**
 10. Wire or delete `log-redaction.ts`; rename `AccountLockDO` → `RequestSerializationDO` (or actually wire it if the race-condition protection is still needed).
