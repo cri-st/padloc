@@ -1,11 +1,13 @@
-# CH5 Auth
+# Padloc
 
 ## Purpose
 
 -   CH5-branded fork of Padloc running as a Cloudflare Worker API plus a static
     PWA and native Cordova shells.
--   Primary shipped surfaces today: `pad.ch5.me`, `api-pad.ch5.me`, and the
-    iPhone app `CH5 Auth`.
+-   Shipped surfaces (web app, API base, and native app display name) are
+    declared per stage in `config/environment-targets.json` (`targets.<stage>`),
+    the per-stage reference map. Never assume literal hostnames or the app name;
+    read them from that map.
 
 ## Repo Layout
 
@@ -58,17 +60,34 @@
     Rotation = re-mint the token + push.
 -   Do not create `.env`, `.dev.vars`, or plaintext secret files.
 -   Production email auth requires a valid `RESEND_API_KEY` and a verified
-    `EMAIL_FROM_ADDRESS` sender domain. Current production sender is
-    `support@ch5.me`.
+    `EMAIL_FROM_ADDRESS` sender. Both are delivered as Cloudflare-side Worker
+    secrets (`config/runtime-requirements.json` marks them `delivery: secret`);
+    the intended per-stage sender value is declared as `emailFromAddress` in
+    `config/environment-targets.json`. Do not hardcode it here.
 
 ## Hosting
 
--   Production web: `https://pad.ch5.me`
--   Production API: `https://api-pad.ch5.me`
--   Staging web: `https://pad-staging.ch5.me`
--   Staging API: `https://api-pad-staging.ch5.me`
--   Local worker: `http://127.0.0.1:8787`
--   Local web: `http://localhost:3000`
+-   `config/environment-targets.json` (`targets.<stage>`) is the declared
+    per-stage reference for app URL, API base, worker/Pages names, allowed
+    origin, display name, and email sender. `npm run runtime-config:check` only
+    validates that this file and `config/runtime-requirements.json` are
+    complete — it does NOT cross-check the live deployment. Read the map instead
+    of assuming literals.
+-   At runtime the Worker resolves the client (app) URL from `CLIENT_URL`,
+    falling back to `ALLOW_ORIGIN` (when not `*`), then a localhost default
+    (`packages/worker/src/server-factory.ts`). This is the URL used in generated
+    links (invite, email verification). `ALLOW_ORIGIN` is declared as derived
+    from `allowedOrigin` in `config/runtime-requirements.json`.
+-   `packages/worker/wrangler.toml` defines only the `dev` and `preview` envs
+    (localhost); it has no `staging`/`production` blocks. The deploy scripts do
+    not set the Worker's `CLIENT_URL`/`ALLOW_ORIGIN`: `scripts/deploy-staging`
+    passes only `--var VERSION/HQ_RELEASE` and `scripts/deploy-production` passes
+    none. So staging/production Worker runtime vars and secrets are authoritative
+    on the Cloudflare side (see Secrets), not injected from the repo.
+-   The PWA bakes its API base from `PL_SERVER_URL` at build time (local default
+    `http://127.0.0.1:${PL_WORKER_PORT:-8787}`). For staging/production,
+    `scripts/deploy-<stage>` passes `PL_SERVER_URL`/`PL_PWA_URL` as literals to
+    `npm run pwa:build`.
 
 ## Rules
 
@@ -82,8 +101,9 @@
     `docs/agentic-autofill-bridge.md`.
 -   Do not reintroduce `process.env.PL_APP_NAME` assumptions into
     Worker/runtime-shared code; Workers do not provide `process`.
--   Keep `clientUrl` on the app host (`pad.ch5.me` / `pad-staging.ch5.me`),
-    never the API host.
+-   Keep `clientUrl` on the app host (the stage's `appUrl`), never the API host.
+    It is resolved at runtime from `CLIENT_URL` (fallback `ALLOW_ORIGIN`) — see
+    Hosting.
 -   The PWA must always be built with an explicit `PL_SERVER_URL`; do not rely
     on runtime mutation.
 -   If email auth breaks, first verify the live Worker secret values and sender
