@@ -12,7 +12,6 @@
     "license": "GPLv3",
     "devDependencies": {
         "@types/chai": "4.2.18",
-        "@types/dompurify": "2.3.3",
         "@types/jsdom": "16.2.14",
         "@types/mocha": "8.2.2",
         "chai": "4.3.4",
@@ -33,7 +32,7 @@
         "@types/stripe": "8.0.416",
         "ansi-colors": "4.1.1",
         "date-fns": "2.22.1",
-        "dompurify": "2.3.8",
+        "dompurify": "3.4.13",
         "dotenv": "16.0.0",
         "fs-extra": "10.0.0",
         "geolite2-redist": "2.0.4",

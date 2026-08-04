@@ -1,8 +1,44 @@
-import { addHook, sanitize } from "dompurify";
+import DOMPurify from "dompurify";
 import { marked } from "marked";
 import TurnDown from "turndown";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { html } from "lit";
+
+// Explicit allowlist scoped to what GFM markdown rendering (marked with
+// gfm:true) actually produces, instead of DOMPurify's full default profile
+// (svg/mathml/style/forms/etc). Keeps the sanitizer's attack surface bounded
+// even against a future/unpatched DOMPurify bypass.
+export const MARKDOWN_ALLOWED_TAGS = [
+    "p",
+    "br",
+    "hr",
+    "strong",
+    "em",
+    "del",
+    "s",
+    "ul",
+    "ol",
+    "li",
+    "a",
+    "img",
+    "code",
+    "pre",
+    "blockquote",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+];
+
+export const MARKDOWN_ALLOWED_ATTR = ["href", "src", "alt", "title"];
 
 marked.use({
     renderer: {
@@ -72,7 +108,7 @@ turndown.addRule("li", {
 
 // Add a hook to make all links open a new window, paired with
 // rel=noopener noreferrer to prevent reverse tabnabbing (CWE-1022)
-addHook("afterSanitizeAttributes", function (node) {
+DOMPurify.addHook("afterSanitizeAttributes", function (node) {
     // set all elements owning target to target=_blank
     if ("target" in node) {
         node.setAttribute("target", "_blank");
@@ -87,7 +123,7 @@ export function markdownToHtml(md: string, san = true) {
         breaks: true,
     });
     if (san) {
-        markup = sanitize(markup);
+        markup = DOMPurify.sanitize(markup, { ALLOWED_TAGS: MARKDOWN_ALLOWED_TAGS, ALLOWED_ATTR: MARKDOWN_ALLOWED_ATTR });
     }
     return markup;
 }
