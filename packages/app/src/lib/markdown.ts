@@ -70,11 +70,13 @@ turndown.addRule("li", {
 //     },
 // });
 
-// Add a hook to make all links open a new window
+// Add a hook to make all links open a new window, paired with
+// rel=noopener noreferrer to prevent reverse tabnabbing (CWE-1022)
 addHook("afterSanitizeAttributes", function (node) {
     // set all elements owning target to target=_blank
     if ("target" in node) {
         node.setAttribute("target", "_blank");
+        node.setAttribute("rel", "noopener noreferrer");
     }
 });
 

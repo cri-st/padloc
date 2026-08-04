@@ -175,7 +175,7 @@ export class WebPlatform extends StubPlatform implements Platform {
     }
 
     openExternalUrl(url: string) {
-        window.open(url, "_blank");
+        window.open(url, "_blank", "noopener,noreferrer");
     }
 
     async saveFile(name: string, type: string, contents: Uint8Array) {
