@@ -6,6 +6,7 @@
         "baseUrl": ".",
         "lib": ["es2020", "dom"],
         "types": ["@cloudflare/workers-types", "@types/node"],
+        "experimentalDecorators": true,
         "paths": {
             "@padloc/core/*": ["../core/*"],
             "@padloc/locale/*": ["../locale/*"]

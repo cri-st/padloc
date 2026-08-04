@@ -5,6 +5,7 @@ import { Logger, VoidLogger } from "@padloc/core/src/logging";
 import { AuthServer } from "@padloc/core/src/auth";
 import { EmailAuthServer } from "@padloc/core/src/auth/email";
 import { TotpAuthConfig, TotpAuthServer } from "@padloc/core/src/auth/totp";
+import { WebAuthnServer, WebAuthnConfig } from "./auth/webauthn";
 import { AttachmentStorage } from "@padloc/core/src/attachment";
 import { Messenger } from "@padloc/core/src/messenger";
 import { Err, ErrorCode } from "@padloc/core/src/error";
@@ -28,7 +29,6 @@ export function createServer(env: Env): Server {
     const storage: Storage = env.DB ? new D1Storage(env.DB) : createStubStorage();
     const logger: Logger = new VoidLogger();
     const messenger: Messenger = createMessenger(env);
-    const authServers: AuthServer[] = [new EmailAuthServer(messenger), new TotpAuthServer(new TotpAuthConfig())];
     const attachmentStorage: AttachmentStorage = createAttachmentStorage(env);
     const changeLoggerConfig = new ChangeLoggerConfig();
     changeLoggerConfig.enabled = true;
@@ -44,6 +44,25 @@ export function createServer(env: Env): Server {
     } else if (env.ALLOW_ORIGIN && env.ALLOW_ORIGIN !== "*") {
         config.clientUrl = env.ALLOW_ORIGIN;
     }
+
+    const authServers: AuthServer[] = [new EmailAuthServer(messenger), new TotpAuthServer(new TotpAuthConfig())];
+    if (config.clientUrl) {
+        try {
+            const clientHostName = new URL(config.clientUrl).hostname;
+            authServers.push(
+                new WebAuthnServer(
+                    new WebAuthnConfig({
+                        rpID: clientHostName,
+                        rpName: clientHostName,
+                        origin: config.clientUrl.replace(/\/+$/, ""),
+                    })
+                )
+            );
+        } catch {
+            // Malformed clientUrl -- skip registering WebAuthn rather than crash startup.
+        }
+    }
+
 
     return new Server(
         config,
