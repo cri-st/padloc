@@ -1,4 +1,4 @@
-import { Serializable, stringToBase64, bytesToBase64 } from "./encoding";
+import { Serializable, stringToBase64, bytesToBase64, stringToBytes } from "./encoding";
 import {
     API,
     StartCreateSessionParams,
@@ -668,6 +668,10 @@ export class Controller extends API {
         const session = new Session();
         session.id = await uuid();
         session.created = new Date();
+        // Absolute lifetime cap, independent of the 14-day idle-timeout sweep
+        // in _getAuth -- bounds the blast radius of a leaked/stolen session
+        // key even if the session keeps getting used.
+        session.expires = new Date(session.created.getTime() + 90 * 24 * 60 * 60 * 1000);
         session.account = account;
         session.device = this.context.device;
         session.key = srp.K!;
@@ -2133,20 +2137,34 @@ export class Controller extends API {
             throw new Err(ErrorCode.AUTHENTICATION_FAILED, "Failed to verify auth token");
         }
 
-        const request = auth.authRequests.find(
-            (r) =>
-                (typeof authenticatorId === "undefined" || r.authenticatorId === authenticatorId) &&
-                (typeof requestId === "undefined" || r.id === requestId) &&
-                r.token === token &&
-                r.status === AuthRequestStatus.Verified &&
-                r.purpose === purpose
-        );
+        let request: AuthRequest | undefined;
+        for (const r of auth.authRequests) {
+            if (
+                (typeof authenticatorId !== "undefined" && r.authenticatorId !== authenticatorId) ||
+                (typeof requestId !== "undefined" && r.id !== requestId) ||
+                r.status !== AuthRequestStatus.Verified ||
+                r.purpose !== purpose
+            ) {
+                continue;
+            }
+            // Timing-safe comparison to avoid leaking token validity via a
+            // response-time side channel (mirrors the pattern already used
+            // for SRP's M1 and for TOTP/HOTP codes in otp.ts).
+            if (await getCryptoProvider().timingSafeEqual(stringToBytes(r.token), stringToBytes(token))) {
+                request = r;
+                break;
+            }
+        }
 
         if (!request) {
             throw new Err(ErrorCode.AUTHENTICATION_FAILED, "Failed to verify auth token");
         }
 
-        auth.authRequests = auth.authRequests.filter((r) => r.id !== request.id);
+        // Re-bind to a `const` so TS can narrow this as defined inside the
+        // filter() closure below (narrowing on a `let` doesn't propagate
+        // into nested closures).
+        const verifiedRequest = request;
+        auth.authRequests = auth.authRequests.filter((r) => r.id !== verifiedRequest.id);
 
         await this.storage.save(auth);
     }
