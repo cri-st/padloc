@@ -22,6 +22,7 @@ const assetsDir = resolve(rootDir, process.env.PL_ASSETS_DIR || "assets");
 const disableCsp = process.env.PL_PWA_DISABLE_CSP === "true";
 
 const { name, terms_of_service } = require(join(assetsDir, "manifest.json"));
+const displayName = process.env.PL_APP_NAME || name;
 
 const isBuildingLocally = pwaUrl.startsWith("http://localhost");
 
@@ -80,13 +81,13 @@ module.exports = {
     },
     plugins: [
         new EnvironmentPlugin({
-            PL_APP_NAME: name,
+            PL_APP_NAME: process.env.PL_APP_NAME || name,
             PL_PWA_URL: pwaUrl,
             PL_SERVER_URL: serverUrl,
             PL_BILLING_ENABLED: null,
             PL_BILLING_DISABLE_PAYMENT: null,
             PL_BILLING_STRIPE_PUBLIC_KEY: null,
-            PL_SUPPORT_EMAIL: "support@padloc.app",
+            PL_SUPPORT_EMAIL: process.env.PL_SUPPORT_EMAIL || "support@padloc.app",
             PL_VERSION: version,
             PL_VENDOR_VERSION: version,
             PL_DISABLE_SW: false,
@@ -100,15 +101,10 @@ module.exports = {
                     return;
                 }
 
-                compiler.hooks.compilation.tap("Update CSP - dev", (compilation) => {
+                compiler.hooks.compilation.tap("Update CSP", (compilation) => {
                     HtmlWebpackPlugin.getHooks(compilation).beforeEmit.tapAsync(
-                        "Update CSP - dev",
+                        "Update CSP",
                         (data, callback) => {
-                            if (!isBuildingLocally) {
-                                callback(null, data);
-                                return;
-                            }
-
                             const builtFilesForCsp = new Map([
                                 ["script-src", [""]],
                                 ["font-src", [""]],
@@ -116,7 +112,11 @@ module.exports = {
                                 ["manifest-src", [""]],
                             ]);
 
-                            // Manually add the root for the CSP meta tag
+                            // Manually add the root for the CSP meta tag -- this
+                            // must run for every build (local AND production),
+                            // otherwise the [REPLACE_X] tokens are left literally
+                            // in the emitted CSP, silently blocking script/font/
+                            // img/manifest loads on any real deployment.
                             for (const cspRule of builtFilesForCsp.keys()) {
                                 const files = builtFilesForCsp.get(cspRule);
 
@@ -126,8 +126,11 @@ module.exports = {
                                 );
                             }
 
-                            // Add the websocket URL + PWA URL of webpack-dev-server to connect-src when building locally, or nothing otherwise
-                            const connectReplacement = `ws://localhost:${process.env.PL_PWA_PORT || 8080}/ws ${pwaUrl}`;
+                            // Add the websocket URL of webpack-dev-server to connect-src
+                            // only when building locally; otherwise just allow pwaUrl.
+                            const connectReplacement = isBuildingLocally
+                                ? `ws://localhost:${process.env.PL_PWA_PORT || 8080}/ws ${pwaUrl}`
+                                : pwaUrl;
                             data.html = data.html.replace("[REPLACE_CONNECT]", connectReplacement);
 
                             callback(null, data);
@@ -139,13 +142,13 @@ module.exports = {
             },
         },
         new HtmlWebpackPlugin({
-            title: name,
+            title: displayName,
             template: resolve(__dirname, "src/index.html"),
             meta: htmlMetaTags,
         }),
         new WebpackPwaManifest({
-            name: name,
-            short_name: name,
+            name: displayName,
+            short_name: displayName,
             icons: [
                 {
                     src: resolve(__dirname, assetsDir, "app-icon.png"),
