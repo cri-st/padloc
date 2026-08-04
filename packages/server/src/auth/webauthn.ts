@@ -181,11 +181,11 @@ export class WebAuthnServer implements AuthServer {
             },
         });
 
-        authenticator.state.registrationInfo.counter = authenticationInfo!.newCounter;
-
         if (!verified) {
             throw new Err(ErrorCode.AUTHENTICATION_FAILED, "Failed to complete authentication request.");
         }
+
+        authenticator.state.registrationInfo.counter = authenticationInfo!.newCounter;
     }
 
     private async _getDescription({ state: { registrationInfo } }: Authenticator) {
