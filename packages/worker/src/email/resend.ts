@@ -8,11 +8,39 @@ import {
 import { Err, ErrorCode } from "@padloc/core/src/error";
 import { getTemplate, interpolate } from "./templates";
 
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+/**
+ * Renders a message's html/txt bodies. HTML-interpolated values are
+ * entity-escaped before substitution — msg.data fields (org name, account
+ * display name, etc.) are user-controlled and must never be placed into the
+ * HTML template unescaped (CWE-79). Text bodies are left as-is.
+ */
+function renderTemplate<T extends MessageData>(msg: Message<T>): { html: string; txt: string } {
+    const { html, txt } = getTemplate(msg.template);
+    const vars = { ...msg.data } as Record<string, string>;
+    const htmlVars: Record<string, string> = {};
+    for (const [key, value] of Object.entries(vars)) {
+        htmlVars[key] = typeof value === "string" ? escapeHtml(value) : value;
+    }
+    return {
+        html: interpolate(html, htmlVars),
+        txt: interpolate(txt, vars),
+    };
+}
+
 export class ResendMessenger {
     constructor(private apiKey: string, private fromAddress: string) {}
 
     async send<T extends MessageData>(addr: string, msg: Message<T>): Promise<void> {
-        const { html, txt } = this._render(msg);
+        const { html, txt } = renderTemplate(msg);
         const idempotencyKey = this._idempotencyKey(msg);
 
         const res = await fetch("https://api.resend.com/emails", {
@@ -42,15 +70,6 @@ export class ResendMessenger {
         }
     }
 
-    private _render<T extends MessageData>(msg: Message<T>): { html: string; txt: string } {
-        const { html, txt } = getTemplate(msg.template);
-        const vars = { ...msg.data };
-        return {
-            html: interpolate(html, vars),
-            txt: interpolate(txt, vars),
-        };
-    }
-
     private _idempotencyKey<T extends MessageData>(msg: Message<T>): string {
         if (msg instanceof EmailAuthMessage) {
             return `email-auth:${msg.data.requestId}`;
@@ -74,7 +93,7 @@ export class MockMessenger {
     }[] = [];
 
     async send<T extends MessageData>(addr: string, msg: Message<T>): Promise<void> {
-        const { html, txt } = this._render(msg);
+        const { html, txt } = renderTemplate(msg);
         const key = `mock:${msg.template}:${Date.now()}`;
         this.sent.push({
             recipient: addr,
@@ -84,15 +103,6 @@ export class MockMessenger {
             idempotencyKey: key,
             template: msg.template,
         });
-    }
-
-    private _render<T extends MessageData>(msg: Message<T>): { html: string; txt: string } {
-        const { html, txt } = getTemplate(msg.template);
-        const vars = { ...msg.data };
-        return {
-            html: interpolate(html, vars),
-            txt: interpolate(txt, vars),
-        };
     }
 
     lastMessage(addr: string) {
@@ -105,17 +115,3 @@ export class MockMessenger {
     }
 }
 
-export function createMessenger(env: {
-    RESEND_API_KEY?: string;
-    EMAIL_BACKEND?: string;
-    EMAIL_KV?: { put(key: string, value: string): Promise<void> };
-    EMAIL_FROM_ADDRESS?: string;
-}) {
-    if (env.EMAIL_BACKEND === "mock") {
-        return new MockMessenger();
-    }
-    if (!env.RESEND_API_KEY) {
-        throw new Err(ErrorCode.SERVER_ERROR, "RESEND_API_KEY not configured");
-    }
-    return new ResendMessenger(env.RESEND_API_KEY, env.EMAIL_FROM_ADDRESS ?? "Padloc <noreply@padloc.app>");
-}
