@@ -44,6 +44,12 @@ export function createServer(env: Env): Server {
     } else if (env.ALLOW_ORIGIN && env.ALLOW_ORIGIN !== "*") {
         config.clientUrl = env.ALLOW_ORIGIN;
     }
+    config.restrictSignup = env.SIGNUP_RESTRICT === "true";
+    config.signupAllowDomains = env.SIGNUP_ALLOW_DOMAINS === "true";
+    config.signupAllowedDomains = (env.SIGNUP_ALLOWED_DOMAINS || "")
+        .split(",")
+        .map((d) => d.trim().toLowerCase())
+        .filter((d) => !!d);
 
     const authServers: AuthServer[] = [new EmailAuthServer(messenger), new TotpAuthServer(new TotpAuthConfig())];
     if (config.clientUrl) {

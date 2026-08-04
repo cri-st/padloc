@@ -84,6 +84,27 @@ export class ServerConfig extends Config {
     @ConfigParam("boolean")
     verifyEmailOnSignup = true;
 
+    /**
+     * Whether to restrict who can create an account. When `false` (default)
+     * signup is open to anyone. When `true`, an account may only be created if
+     * the email domain is allow-listed (see `signupAllowDomains` /
+     * `signupAllowedDomains`) OR the email holds a valid, unexpired org invite.
+     */
+    @ConfigParam("boolean")
+    restrictSignup = false;
+
+    /**
+     * Whether the email-domain allowlist condition is active. Only relevant
+     * when `restrictSignup` is `true`. When `false`, signup is effectively
+     * invite-only.
+     */
+    @ConfigParam("boolean")
+    signupAllowDomains = false;
+
+    /** Email domains permitted to sign up when `signupAllowDomains` is enabled. */
+    @ConfigParam("string[]")
+    signupAllowedDomains: string[] = [];
+
     @ConfigParam("string[]")
     defaultAuthTypes: AuthType[] = [AuthType.Email];
 
@@ -340,6 +361,15 @@ export class Controller extends API {
     }: StartAuthRequestParams): Promise<StartAuthRequestResponse> {
         const auth = (this.context.auth = await this._getAuth(email));
         const provisioning = (this.context.provisioning = await this.provisioner.getProvisioning(auth));
+
+        // Enforce signup restrictions up front so disallowed emails never receive
+        // a verification code (protects UX and burns no email quota on strangers).
+        const isSignupAttempt =
+            purpose === AuthPurpose.Signup ||
+            (purpose === AuthPurpose.Login && auth.accountStatus !== AccountStatus.Active);
+        if (isSignupAttempt) {
+            this._assertSignupAllowed(email, auth);
+        }
 
         const authenticators = await this._getAuthenticators(auth);
 
@@ -753,22 +783,76 @@ export class Controller extends API {
         this.log("account.revokeSession", { revokedSession: { id, device: session.device } });
     }
 
+    /**
+     * Enforces signup restrictions configured via [[ServerConfig.restrictSignup]].
+     * Allows the signup when restriction is off, when the email domain is
+     * allow-listed, or when the email holds a valid (unexpired) org invite.
+     * `auth` must be the [[Auth]] object for `email`, so its `invites` list only
+     * ever contains invites addressed to that same email (email match by design).
+     */
+    private _assertSignupAllowed(email: string, auth: Auth, invite?: { id: string; org: string }) {
+        if (!this.config.restrictSignup) {
+            return;
+        }
+
+        const normalizedEmail = email.trim().toLowerCase();
+
+        // Domain allowlist condition
+        if (this.config.signupAllowDomains) {
+            const domain = normalizedEmail.split("@")[1] || "";
+            const allowed = this.config.signupAllowedDomains
+                .map((d) => d.trim().toLowerCase())
+                .filter((d) => !!d);
+            if (domain && allowed.includes(domain)) {
+                return;
+            }
+        }
+
+        // Valid, unexpired invite condition. `auth.invites` only contains invites
+        // addressed to this email, so a matching entry guarantees the email match.
+        const now = Date.now();
+        const hasValidInvite = auth.invites.some((inv) => {
+            if (new Date(inv.expires).getTime() <= now) {
+                return false;
+            }
+            // When a specific invite is referenced (createAccount), it must match.
+            if (invite) {
+                return inv.id === invite.id && inv.orgId === invite.org;
+            }
+            return true;
+        });
+        if (hasValidInvite) {
+            return;
+        }
+
+        throw new Err(
+            ErrorCode.PROVISIONING_NOT_ALLOWED,
+            "Signups are currently restricted. This email is not permitted to register. Please use an invitation or contact your administrator."
+        );
+    }
+
     async createAccount({
         account,
         auth: { verifier, keyParams },
         authToken,
         verify,
+        invite,
     }: CreateAccountParams): Promise<Account> {
         // For compatibility with v3 clients, which still use the deprecated `verify` property name
         if (verify && !authToken) {
             authToken = verify;
         }
 
+        const auth = (this.context.auth = await this._getAuth(account.email));
+
+        // Enforce signup restrictions (domain allowlist and/or valid invite) before
+        // consuming the auth token or provisioning anything.
+        this._assertSignupAllowed(account.email, auth, invite);
+
         if (this.config.verifyEmailOnSignup) {
             await this._useAuthToken({ email: account.email, token: authToken, purpose: AuthPurpose.Signup });
         }
 
-        const auth = (this.context.auth = await this._getAuth(account.email));
         this.context.provisioning = await this.provisioner.getProvisioning(auth);
 
         // Make sure that no account with this email exists and that the email is not blocked from signing up

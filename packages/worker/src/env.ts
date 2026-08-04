@@ -12,6 +12,9 @@ export interface Env {
     EMAIL_KV?: KVNamespace;
     EMAIL_FROM_ADDRESS?: string;
     EMAIL_VERIFY_ON_SIGNUP?: string;
+    SIGNUP_RESTRICT?: string;
+    SIGNUP_ALLOW_DOMAINS?: string;
+    SIGNUP_ALLOWED_DOMAINS?: string;
     RATE_LIMIT_MAX_REQUESTS?: string;
     RATE_LIMIT_WINDOW_MS?: string;
     HQ_SENTRY_DSN?: string;
