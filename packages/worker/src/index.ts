@@ -64,6 +64,16 @@ export default {
         initializeHqInstrumentationFromEnv(env, ctx);
 
         const allowOrigin = env.ALLOW_ORIGIN || "*";
+        if (allowOrigin === "*" && (env.HQ_ENVIRONMENT === "production" || env.HQ_ENVIRONMENT === "staging")) {
+            captureHqException(
+                new Error(`ALLOW_ORIGIN misconfigured: resolved to '*' in ${env.HQ_ENVIRONMENT}`),
+                requestAttributes(request)
+            );
+            return new Response(JSON.stringify({ error: "server_misconfigured" }), {
+                status: 503,
+                headers: { "Content-Type": "application/json; charset=utf-8" },
+            });
+        }
         const config = new WorkerReceiverConfig();
         config.allowOrigin = allowOrigin;
         config.idempotencyStore = new IdempotencyStore(env.HINTS);
