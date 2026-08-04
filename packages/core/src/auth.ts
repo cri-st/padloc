@@ -236,6 +236,17 @@ export class Auth extends Serializable implements Storable {
     /** Completely disables mfa for a given account. Only use for testing! */
     disableMFA = false;
 
+    /**
+     * Persistent count of consecutive failed password (SRP) login attempts.
+     * Unlike AuthRequest.tries / SRPSession.failedAttempts, this survives
+     * across fresh sessions -- see completeCreateSession in server.ts.
+     */
+    failedLoginAttempts = 0;
+
+    /** If set and in the future, password login is rejected until this time. */
+    @AsDate()
+    lockedUntil?: Date;
+
     metaData?: any = undefined;
 
     constructor(public email: string = "") {

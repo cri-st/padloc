@@ -618,6 +618,18 @@ export class Controller extends API {
         const auth = (this.context.auth = await this._getAuth(acc.email));
         this.context.provisioning = await this.provisioner.getProvisioning(auth);
 
+        // Persistent per-account lockout: unlike AuthRequest.tries and
+        // SRPSession.failedAttempts (which both reset whenever the client
+        // requests a fresh session), auth.failedLoginAttempts/lockedUntil
+        // survive across sessions, so an attacker can't dodge the lockout
+        // by simply starting a new SRP session for every guess.
+        if (auth.lockedUntil && auth.lockedUntil.getTime() > Date.now()) {
+            throw new Err(
+                ErrorCode.AUTHENTICATION_TRIES_EXCEEDED,
+                "Too many failed login attempts. Please try again later."
+            );
+        }
+
         // Get the pending SRP context for the given account
         const srpSession = auth.srpSessions.find((s) => s.id === srpId);
 
@@ -638,6 +650,10 @@ export class Controller extends API {
         if (!(await getCryptoProvider().timingSafeEqual(M, srp.M1!))) {
             this.log("account.createSession", { success: false });
             ++srpSession.failedAttempts;
+            ++auth.failedLoginAttempts;
+            if (auth.failedLoginAttempts >= 10) {
+                auth.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+            }
             if (srpSession.failedAttempts >= 5) {
                 if (this.context.device) {
                     try {
@@ -663,6 +679,10 @@ export class Controller extends API {
 
             throw new Err(ErrorCode.INVALID_CREDENTIALS);
         }
+
+        // Verification succeeded -- clear the persistent lockout counter.
+        auth.failedLoginAttempts = 0;
+        auth.lockedUntil = undefined;
 
         // Create a new session object
         const session = new Session();
