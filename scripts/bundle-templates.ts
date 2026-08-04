@@ -35,8 +35,9 @@ tsLines.push("export type TemplateName = keyof typeof templates;", "");
 
 const getTemplateFn = [
     "export function getTemplate(name: string): { html: string; txt: string } {",
-    '  const html = (templates as any)[name + "_html"];',
-    '  const txt = (templates as any)[name + "_txt"];',
+    '  const key = name.replace(/-/g, "_");',
+    '  const html = (templates as Record<string, string>)[key + "_html"];',
+    '  const txt = (templates as Record<string, string>)[key + "_txt"];',
     '  if (!html || !txt) throw new Error("Template not found: " + name);',
     "  return { html, txt };",
     "}",

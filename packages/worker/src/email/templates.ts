@@ -205,7 +205,7 @@ const templates = {
                                                     "
                                                 >
                                                     You have been asked by {{ invitedBy }} to confirm your membership
-                                                    with the CH5 organization <strong>{{ orgName }}</strong>.
+                                                    with the {{ appName }} organization <strong>{{ orgName }}</strong>.
                                                 </p>
 
                                                 <table
@@ -332,7 +332,8 @@ const templates = {
                                         <span
                                             class="apple-link"
                                             style="color: #999999; font-size: 12px; text-align: center"
-                                            >This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!</span
+                                            >This email was sent to you by {{ appName }} ({{ appUrl }}). If you have
+                                            any questions, please don't hesitate to contact us at {{ supportEmail }}!</span
                                         >
                                         <!--<br> Don't like these emails? <a href="" style="text-decoration: underline; color: #999999; font-size: 12px; text-align: center;">Unsubscribe</a>.-->
                                     </td>
@@ -351,13 +352,13 @@ const templates = {
 `,
     confirm_org_member_invite_txt: `Hi there!
 
-You have been asked by {{ invitedBy }} to confirm your membership with the CH5 organization {{ orgName }}.
+You have been asked by {{ invitedBy }} to confirm your membership with the {{ appName }} organization {{ orgName }}.
 
 Confirm Membership: {{ acceptInviteUrl }}
 
 Have a great day!
 
-This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!`,
+This email was sent to you by {{ appName }} ({{ appUrl }}). If you have any questions, please don't hesitate to contact us at {{ supportEmail }}!`,
     email_auth_html: `<!DOCTYPE html>
 <html>
     <head>
@@ -631,7 +632,8 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
                                         <span
                                             class="apple-link"
                                             style="color: #999999; font-size: 12px; text-align: center"
-                                            >This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!</span
+                                            >This email was sent to you by {{ appName }} ({{ appUrl }}). If you have
+                                            any questions, please don't hesitate to contact us at {{ supportEmail }}!</span
                                         >
                                         <!--<br> Don't like these emails? <a href="" style="text-decoration: underline; color: #999999; font-size: 12px; text-align: center;">Unsubscribe</a>.-->
                                     </td>
@@ -656,7 +658,7 @@ Your email verification code is:
 
 Have a great day!
 
-This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!`,
+This email was sent to you by {{ appName }} ({{ appUrl }}). If you have any questions, please don't hesitate to contact us at {{ supportEmail }}!`,
     failed_login_attempt_html: `<!DOCTYPE html>
 <html>
     <head>
@@ -861,8 +863,8 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
                                                     "
                                                 >
                                                     This is just an email to warn you that there was a
-                                                    <strong>failed</strong> attempt to login to your account in CH5 Auth,
-                                                    from {{ location }}.
+                                                    <strong>failed</strong> attempt to login to your account in {{ appName }}
+                                                    Auth, from {{ location }}.
                                                 </p>
 
                                                 <p
@@ -940,7 +942,8 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
                                         <span
                                             class="apple-link"
                                             style="color: #999999; font-size: 12px; text-align: center"
-                                            >This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!</span
+                                            >This email was sent to you by {{ appName }} ({{ appUrl }}). If you have
+                                            any questions, please don't hesitate to contact us at {{ supportEmail }}!</span
                                         >
                                         <!--<br> Don't like these emails? <a href="" style="text-decoration: underline; color: #999999; font-size: 12px; text-align: center;">Unsubscribe</a>.-->
                                     </td>
@@ -959,7 +962,7 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
 `,
     failed_login_attempt_txt: `Hi there!
 
-This is just an email to warn you that there was a failed attempt to login to your account in CH5 Auth, from {{ location }}.
+This is just an email to warn you that there was a failed attempt to login to your account in {{ appName }}, from {{ location }}.
 
 If this was you, there's no action necessary, otherwise you might want to make sure your trusted devices haven't been compromised, or to remove potentially compromised devices from your trusted list inside the app.
 
@@ -967,7 +970,7 @@ Note that if this happened on a trusted device, it was already removed from the 
 
 Have a great day!
 
-This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!
+This email was sent to you by {{ appName }} ({{ appUrl }}). If you have any questions, please don't hesitate to contact us at {{ supportEmail }}!
 `,
     join_org_invite_html: `<!DOCTYPE html>
 <html>
@@ -1173,7 +1176,7 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
                                                     "
                                                 >
                                                     You have been invited by <strong>{{ invitedBy }}</strong> to join
-                                                    their CH5 organization <strong>{{ orgName }}</strong>!
+                                                    their {{ appName }} organization <strong>{{ orgName }}</strong>!
                                                 </p>
 
                                                 <table
@@ -1300,7 +1303,8 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
                                         <span
                                             class="apple-link"
                                             style="color: #999999; font-size: 12px; text-align: center"
-                                            >This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!</span
+                                            >This email was sent to you by {{ appName }} ({{ appUrl }}). If you have
+                                            any questions, please don't hesitate to contact us at {{ supportEmail }}!</span
                                         >
                                         <!--<br> Don't like these emails? <a href="" style="text-decoration: underline; color: #999999; font-size: 12px; text-align: center;">Unsubscribe</a>.-->
                                     </td>
@@ -1319,13 +1323,13 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
 `,
     join_org_invite_txt: `Hi there!
 
-You have been invited by {{ invitedBy }} to join their CH5 organization {{ orgName }}!
+You have been invited by {{ invitedBy }} to join their {{ appName }} organization {{ orgName }}!
 
 Join {{ orgName }}: {{ acceptInviteUrl }}
 
 Have a great day!
 
-This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!`,
+This email was sent to you by {{ appName }} ({{ appUrl }}). If you have any questions, please don't hesitate to contact us at {{ supportEmail }}!`,
     join_org_invite_accepted_html: `<!DOCTYPE html>
 <html>
     <head>
@@ -1658,7 +1662,8 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
                                         <span
                                             class="apple-link"
                                             style="color: #999999; font-size: 12px; text-align: center"
-                                            >This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!</span
+                                            >This email was sent to you by {{ appName }} ({{ appUrl }}). If you have
+                                            any questions, please don't hesitate to contact us at {{ supportEmail }}!</span
                                         >
                                         <!--<br> Don't like these emails? <a href="" style="text-decoration: underline; color: #999999; font-size: 12px; text-align: center;">Unsubscribe</a>.-->
                                     </td>
@@ -1683,7 +1688,7 @@ Confirm Membership: {{ confirmMemberUrl }}
 
 Have a great day!
 
-This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!`,
+This email was sent to you by {{ appName }} ({{ appUrl }}). If you have any questions, please don't hesitate to contact us at {{ supportEmail }}!`,
     join_org_invite_completed_html: `<!DOCTYPE html>
 <html>
     <head>
@@ -1887,7 +1892,7 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
                                                         margin-bottom: 15px;
                                                     "
                                                 >
-                                                    Good news! You now have access to the CH5 organization
+                                                    Good news! You now have access to the {{ appName }} organization
                                                     <strong>{{ orgName }}</strong>.
                                                 </p>
 
@@ -2015,7 +2020,8 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
                                         <span
                                             class="apple-link"
                                             style="color: #999999; font-size: 12px; text-align: center"
-                                            >This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!</span
+                                            >This email was sent to you by {{ appName }} ({{ appUrl }}). If you have
+                                            any questions, please don't hesitate to contact us at {{ supportEmail }}!</span
                                         >
                                         <!--<br> Don't like these emails? <a href="" style="text-decoration: underline; color: #999999; font-size: 12px; text-align: center;">Unsubscribe</a>.-->
                                     </td>
@@ -2034,12 +2040,12 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
 `,
     join_org_invite_completed_txt: `Hi there!
 
-Good news! You now have access to the CH5 organization {{ orgName }}.
+Good news! You now have access to the {{ appName }} organization {{ orgName }}.
 
-Open CH5 Auth: {{ openAppUrl }}
+Open {{ appName }}: {{ openAppUrl }}
 
 Have a great day!
-This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!
+This email was sent to you by {{ appName }} ({{ appUrl }}). If you have any questions, please don't hesitate to contact us at {{ supportEmail }}!
 `,
     new_login_html: `<!DOCTYPE html>
 <html>
@@ -2245,7 +2251,7 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
                                                     "
                                                 >
                                                     This is just an email to warn you that there was a
-                                                    <strong>new successful login</strong> to your account in CH5 Auth,
+                                                    <strong>new successful login</strong> to your account in {{ appName }},
                                                     from {{ location }}.
                                                 </p>
 
@@ -2311,7 +2317,8 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
                                         <span
                                             class="apple-link"
                                             style="color: #999999; font-size: 12px; text-align: center"
-                                            >This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!</span
+                                            >This email was sent to you by {{ appName }} ({{ appUrl }}). If you have
+                                            any questions, please don't hesitate to contact us at {{ supportEmail }}!</span
                                         >
                                         <!--<br> Don't like these emails? <a href="" style="text-decoration: underline; color: #999999; font-size: 12px; text-align: center;">Unsubscribe</a>.-->
                                     </td>
@@ -2330,13 +2337,13 @@ This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any que
 `,
     new_login_txt: `Hi there!
 
-This is just an email to warn you that there was a new successful login to your account in CH5 Auth, from {{ location }}.
+This is just an email to warn you that there was a new successful login to your account in {{ appName }}, from {{ location }}.
 
 If this was you, there's no action necessary, otherwise you might want to make sure your trusted devices haven't been compromised, or to remove potentially compromised devices from your trusted list inside the app.
 
 Have a great day!
 
-This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!
+This email was sent to you by {{ appName }} ({{ appUrl }}). If you have any questions, please don't hesitate to contact us at {{ supportEmail }}!
 `,
     plain_html: `<pre>
 {{ message }}
@@ -2357,7 +2364,7 @@ export function getTemplate(name: string): { html: string; txt: string } {
 }
 
 export function interpolate(template: string, vars: Record<string, string>): string {
-    return template.replace(/\{\{ ?(\w+) ?\}\}/gi, (_, key) => vars[key] ?? "{{ " + key + " }}");
+    return template.replace(/{{ ?(\w+) ?}}/gi, (_, key) => vars[key] ?? "{{ " + key + " }}");
 }
 
 export const templateNames = [

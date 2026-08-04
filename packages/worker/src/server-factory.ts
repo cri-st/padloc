@@ -79,7 +79,7 @@ function createMessenger(env: Env): Messenger {
     }
     if (env.RESEND_API_KEY && env.EMAIL_FROM_ADDRESS) {
         console.log("[createMessenger] using ResendMessenger");
-        return new ResendMessenger(env.RESEND_API_KEY, env.EMAIL_FROM_ADDRESS);
+        return new ResendMessenger(env.RESEND_API_KEY, env.EMAIL_FROM_ADDRESS, env.APP_NAME, env.CLIENT_URL);
     }
     throw new Err(
         ErrorCode.SERVER_ERROR,

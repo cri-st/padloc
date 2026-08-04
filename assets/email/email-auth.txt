@@ -6,4 +6,4 @@ Your email verification code is:
 
 Have a great day!
 
-This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!
+This email was sent to you by {{ appName }} ({{ appUrl }}). If you have any questions, please don't hesitate to contact us at {{ supportEmail }}!

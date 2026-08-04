@@ -5,6 +5,7 @@ export interface Env {
     ACCOUNT_LOCK?: DurableObjectNamespace;
     ALLOW_ORIGIN?: string;
     CLIENT_URL?: string;
+    APP_NAME?: string;
     VERSION?: string;
     RESEND_API_KEY?: string;
     EMAIL_BACKEND?: string;

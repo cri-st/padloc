@@ -4,6 +4,7 @@ import { App } from "@padloc/core/src/app";
 import { debounce, uuid } from "@padloc/core/src/util";
 import { FieldType, Field, VaultItem } from "@padloc/core/src/item";
 import { PasskeyCredential } from "@padloc/core/src/passkey";
+import { APP_NAME } from "@padloc/core/src/branding";
 import { bytesToBase64 } from "@padloc/core/src/encoding";
 import { ExtensionWorkerPlatform } from "./worker-platform";
 import { FetchSender } from "./fetch-sender";
@@ -757,7 +758,7 @@ async function updateBadgeAndContextMenu() {
         actionApi.setTitle({ title: "Please Log In" });
     } else {
         actionApi.setIcon({ path: "icon.png" });
-        actionApi.setTitle({ title: "CH5 Auth" });
+        actionApi.setTitle({ title: APP_NAME });
     }
 
     // Update context menu

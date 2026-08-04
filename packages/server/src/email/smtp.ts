@@ -3,6 +3,7 @@ import { createTransport, Transporter, TransportOptions } from "nodemailer";
 import { Config, ConfigParam } from "@padloc/core/src/config";
 import { readFileSync, readdirSync } from "fs";
 import { Err, ErrorCode } from "@padloc/core/src/error";
+import { APP_NAME, SUPPORT_EMAIL, APP_URL } from "@padloc/core/src/branding";
 import { resolve } from "path";
 import dompurify from "../tools/dompurify";
 
@@ -34,6 +35,12 @@ export class SMTPConfig extends Config {
 
     @ConfigParam()
     from?: string;
+
+    @ConfigParam()
+    appName?: string;
+
+    @ConfigParam()
+    appUrl?: string;
 }
 
 export class SMTPSender implements Messenger {
@@ -76,7 +83,13 @@ export class SMTPSender implements Messenger {
             throw new Err(ErrorCode.SERVER_ERROR, `Template not found: ${message.template}`);
         }
 
-        for (const [name, value] of Object.entries({ title: message.title, ...message.data })) {
+        for (const [name, value] of Object.entries({
+            appName: this.config.appName || APP_NAME,
+            supportEmail: this.config.from || SUPPORT_EMAIL,
+            appUrl: this.config.appUrl || APP_URL,
+            title: message.title,
+            ...message.data,
+        })) {
             html = html.replace(new RegExp(`{{ ?${name} ?}}`, "gi"), dompurify.sanitize(value));
             text = text.replace(new RegExp(`{{ ?${name} ?}}`, "gi"), value);
         }

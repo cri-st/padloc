@@ -7,6 +7,7 @@ import {
 } from "@padloc/core/src/messenger";
 import { Err, ErrorCode } from "@padloc/core/src/error";
 import { getTemplate, interpolate } from "./templates";
+import { APP_NAME, APP_URL, SUPPORT_EMAIL } from "@padloc/core/src/branding";
 
 function escapeHtml(value: string): string {
     return value
@@ -23,9 +24,17 @@ function escapeHtml(value: string): string {
  * display name, etc.) are user-controlled and must never be placed into the
  * HTML template unescaped (CWE-79). Text bodies are left as-is.
  */
-function renderTemplate<T extends MessageData>(msg: Message<T>): { html: string; txt: string } {
+function renderTemplate<T extends MessageData>(
+    msg: Message<T>,
+    branding: { appName: string; supportEmail: string; appUrl: string }
+): { html: string; txt: string } {
     const { html, txt } = getTemplate(msg.template);
-    const vars = { ...msg.data } as Record<string, string>;
+    const vars = {
+        appName: branding.appName,
+        supportEmail: branding.supportEmail,
+        appUrl: branding.appUrl,
+        ...msg.data,
+    } as Record<string, string>;
     const htmlVars: Record<string, string> = {};
     for (const [key, value] of Object.entries(vars)) {
         htmlVars[key] = typeof value === "string" ? escapeHtml(value) : value;
@@ -37,10 +46,25 @@ function renderTemplate<T extends MessageData>(msg: Message<T>): { html: string;
 }
 
 export class ResendMessenger {
-    constructor(private apiKey: string, private fromAddress: string) {}
+    /**
+     * appName/appUrl default to the committed CH5 Auth branding constants
+     * but are overridable per-deployment via env.APP_NAME/env.CLIENT_URL
+     * (see server-factory.ts's createMessenger) so a personal fork/deploy
+     * never needs to hardcode its own branding into committed source.
+     */
+    constructor(
+        private apiKey: string,
+        private fromAddress: string,
+        private appName: string = APP_NAME,
+        private appUrl: string = APP_URL
+    ) {}
 
     async send<T extends MessageData>(addr: string, msg: Message<T>): Promise<void> {
-        const { html, txt } = renderTemplate(msg);
+        const { html, txt } = renderTemplate(msg, {
+            appName: this.appName,
+            supportEmail: this.fromAddress,
+            appUrl: this.appUrl,
+        });
         const idempotencyKey = this._idempotencyKey(msg);
 
         const res = await fetch("https://api.resend.com/emails", {
@@ -93,7 +117,7 @@ export class MockMessenger {
     }[] = [];
 
     async send<T extends MessageData>(addr: string, msg: Message<T>): Promise<void> {
-        const { html, txt } = renderTemplate(msg);
+        const { html, txt } = renderTemplate(msg, { appName: APP_NAME, supportEmail: SUPPORT_EMAIL, appUrl: APP_URL });
         const key = `mock:${msg.template}:${Date.now()}`;
         this.sent.push({
             recipient: addr,

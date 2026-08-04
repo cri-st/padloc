@@ -1,9 +1,9 @@
 Hi there!
 
-You have been invited by {{ invitedBy }} to join their CH5 organization {{ orgName }}!
+You have been invited by {{ invitedBy }} to join their {{ appName }} organization {{ orgName }}!
 
 Join {{ orgName }}: {{ acceptInviteUrl }}
 
 Have a great day!
 
-This email was sent to you by CH5 Auth (https://pad.ch5.me). If you have any questions, please don't hesitate to contact us at support@ch5.me!
+This email was sent to you by {{ appName }} ({{ appUrl }}). If you have any questions, please don't hesitate to contact us at {{ supportEmail }}!

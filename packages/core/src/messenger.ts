@@ -1,6 +1,8 @@
+import { APP_NAME } from "./branding";
+
 export type MessageData = { [param: string]: string };
 
-function getAppName(defaultName = "CH5 Auth") {
+function getAppName(defaultName = APP_NAME) {
     if (typeof process !== "undefined" && process.env?.PL_APP_NAME) {
         return process.env.PL_APP_NAME;
     }
