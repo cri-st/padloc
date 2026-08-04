@@ -2,8 +2,18 @@
  * Canary allowlist used until the extension ships a complete bundled Public
  * Suffix List policy. Keeping this explicit prevents a page on an unrelated
  * domain from activating the provider during the CH5 and Google rollout.
+ *
+ * Self-hosted/personal forks can append trusted roots at build time via the
+ * `PL_PASSKEY_RP_ROOTS` env var (comma-separated), without editing this
+ * committed CH5-branded default list. The CH5/Google baseline always stays
+ * allowed.
  */
-export const PASSKEY_APPROVED_RP_ROOTS = Object.freeze(["ch5.me", "google.com"]);
+const ADDITIONAL_PASSKEY_RP_ROOTS = (process.env.PL_PASSKEY_RP_ROOTS || "")
+    .split(",")
+    .map((root) => root.trim().toLowerCase())
+    .filter(Boolean);
+
+export const PASSKEY_APPROVED_RP_ROOTS = Object.freeze(["ch5.me", "google.com", ...ADDITIONAL_PASSKEY_RP_ROOTS]);
 
 export function isPasskeyProviderOriginEnabled(origin: string): boolean {
     try {

@@ -595,7 +595,7 @@ export class LoginOrSignup extends StartForm {
         );
 
         if (choice === 1) {
-            window.open("https://padloc.app/help/migrate-v3", "_system");
+            window.open(process.env.PL_MIGRATE_V3_HELP_URL || "https://padloc.app/help/migrate-v3", "_system");
             return this._migrateLegacyAccount(authResponse);
         } else if (choice === 2) {
             this._submitEmailButton.stop();

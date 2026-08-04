@@ -14,6 +14,10 @@ const rootDir = resolve(__dirname, "../..");
 const assetsDir = resolve(rootDir, process.env.PL_ASSETS_DIR || "assets");
 
 const { name, terms_of_service, web_extension } = require(join(assetsDir, "manifest.json"));
+// Allow personal/self-hosted forks to override the ToS link and passkey RP
+// allowlist at build time without editing the committed CH5-branded assets.
+const termsOfServiceUrl = process.env.PL_TERMS_OF_SERVICE_URL || terms_of_service;
+const passkeyRpRoots = process.env.PL_PASSKEY_RP_ROOTS || "";
 
 module.exports = {
     entry: {
@@ -92,11 +96,13 @@ module.exports = {
             PL_BILLING_ENABLED: null,
             PL_BILLING_DISABLE_PAYMENT: null,
             PL_BILLING_STRIPE_PUBLIC_KEY: null,
-            PL_SUPPORT_EMAIL: "support@padloc.app",
+            PL_SUPPORT_EMAIL: process.env.PL_SUPPORT_EMAIL || "support@padloc.app",
             PL_VERSION: version,
             PL_VENDOR_VERSION: version,
             PL_DISABLE_SW: true,
-            PL_TERMS_OF_SERVICE: terms_of_service,
+            PL_TERMS_OF_SERVICE: termsOfServiceUrl,
+            PL_PASSKEY_RP_ROOTS: passkeyRpRoots,
+            PL_MIGRATE_V3_HELP_URL: process.env.PL_MIGRATE_V3_HELP_URL || "",
         }),
         new CleanWebpackPlugin(),
         new HtmlWebpackPlugin({
