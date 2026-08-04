@@ -1,0 +1,92 @@
+# Template for a real, git-ignored wrangler.local.toml used to deploy
+# padloc-worker under your own personal/self-managed Cloudflare account
+# (separate from this repo's shared deploy config). Copy this file to
+# wrangler.local.toml (already git-ignored) and fill in real values from
+# `wrangler d1 create`, `wrangler kv namespace create`, and
+# `wrangler r2 bucket create` output. Never commit the filled-in file.
+#
+# Deploy with:
+#   wrangler deploy -c wrangler.local.toml --env=staging
+#   wrangler deploy -c wrangler.local.toml --env=production
+
+name = "padloc-worker"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+account_id = "<your-cloudflare-account-id>"
+
+[alias]
+"@padloc/locale/src/translate" = "./node_modules/@padloc/locale/src/translate.ts"
+"@padloc/core/src" = "./node_modules/@padloc/core/src"
+"@padloc/locale/src" = "./node_modules/@padloc/locale/src"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AccountLockDO"]
+
+[env.staging]
+name = "padloc-worker-staging"
+# No custom route yet -- test on the default *.workers.dev subdomain first,
+# then add a route once the custom domain is verified working.
+# routes = [{ pattern = "api-staging.example.com/*", zone_name = "example.com" }]
+
+[env.staging.vars]
+ALLOW_ORIGIN = "https://staging.example.com"
+CLIENT_URL = "https://staging.example.com"
+HQ_ENVIRONMENT = "staging"
+HQ_SERVICE_NAME = "padloc-worker"
+
+[[env.staging.kv_namespaces]]
+binding = "EMAIL_KV"
+id = "<your-staging-email-kv-id>"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "padloc-staging"
+database_id = "<your-staging-d1-id>"
+migrations_dir = "migrations"
+
+[[env.staging.r2_buckets]]
+binding = "ATTACHMENTS"
+bucket_name = "padloc-attachments-staging"
+
+[[env.staging.kv_namespaces]]
+binding = "HINTS"
+id = "<your-staging-hints-kv-id>"
+
+[[env.staging.durable_objects.bindings]]
+name = "ACCOUNT_LOCK"
+class_name = "AccountLockDO"
+
+[env.production]
+name = "padloc-worker"
+# No custom route yet -- test on the default *.workers.dev subdomain first,
+# then add a route once the custom domain is verified working.
+# routes = [{ pattern = "api.example.com/*", zone_name = "example.com" }]
+
+[env.production.vars]
+ALLOW_ORIGIN = "https://app.example.com"
+CLIENT_URL = "https://app.example.com"
+HQ_ENVIRONMENT = "production"
+HQ_SERVICE_NAME = "padloc-worker"
+
+[[env.production.kv_namespaces]]
+binding = "EMAIL_KV"
+id = "<your-production-email-kv-id>"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "padloc-production"
+database_id = "<your-production-d1-id>"
+migrations_dir = "migrations"
+
+[[env.production.r2_buckets]]
+binding = "ATTACHMENTS"
+bucket_name = "padloc-attachments-production"
+
+[[env.production.kv_namespaces]]
+binding = "HINTS"
+id = "<your-production-hints-kv-id>"
+
+[[env.production.durable_objects.bindings]]
+name = "ACCOUNT_LOCK"
+class_name = "AccountLockDO"

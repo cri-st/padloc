@@ -1,7 +1,10 @@
 name = "padloc-worker"
 main = "src/index.ts"
 compatibility_date = "2025-04-01"
-account_id = "25bb5f8d9ec4a36106f0ff6b519133b1"
+# account_id intentionally omitted -- resolved via `wrangler login` or the
+# CLOUDFLARE_ACCOUNT_ID env var so no account is hardcoded in a committed file.
+# Real (non-local) deploy environments live in wrangler.local.toml, which is
+# git-ignored -- see wrangler.local.toml.example for the template.
 
 [alias]
 "@padloc/locale/src/translate" = "./node_modules/@padloc/locale/src/translate.ts"
@@ -12,11 +15,12 @@ account_id = "25bb5f8d9ec4a36106f0ff6b519133b1"
 tag = "v1"
 new_classes = ["AccountLockDO"]
 
-# Top-level D1 migration config (used for local dev)
+# Top-level D1 migration config (used for local dev). --local mode never
+# contacts a real Cloudflare account, so these IDs are placeholders.
 [[d1_databases]]
 binding = "DB"
 database_name = "padloc-dev"
-database_id = "e2bf5126-0913-48a1-831d-531606f398c9"
+database_id = "00000000-0000-0000-0000-000000000001"
 migrations_dir = "migrations"
 
 [env.dev]
@@ -37,7 +41,7 @@ id = "PADLOC_EMAIL_DEV"
 [[env.dev.d1_databases]]
 binding = "DB"
 database_name = "padloc-dev"
-database_id = "e2bf5126-0913-48a1-831d-531606f398c9"
+database_id = "00000000-0000-0000-0000-000000000001"
 migrations_dir = "migrations"
 
 [[env.dev.r2_buckets]]
@@ -64,12 +68,12 @@ HQ_SERVICE_NAME = "padloc-worker"
 
 [[env.preview.kv_namespaces]]
 binding = "EMAIL_KV"
-id = "9dbdc747eeb4472681e9f081eb9e8269"
+id = "00000000000000000000000000000001"
 
 [[env.preview.d1_databases]]
 binding = "DB"
 database_name = "padloc-preview"
-database_id = "426f172f-8117-48c6-849b-1b26901b89e6"
+database_id = "00000000-0000-0000-0000-000000000002"
 migrations_dir = "migrations"
 
 [[env.preview.r2_buckets]]
@@ -78,72 +82,9 @@ bucket_name = "padloc-attachments-preview"
 
 [[env.preview.kv_namespaces]]
 binding = "HINTS"
-id = "f868962679c74a33886cff584f37d18d"
+id = "00000000000000000000000000000002"
 
 [[env.preview.durable_objects.bindings]]
 name = "ACCOUNT_LOCK"
 class_name = "AccountLockDO"
 
-[env.staging]
-name = "padloc-worker-staging"
-routes = [{ pattern = "api-pad-staging.ch5.me/*", zone_name = "ch5.me" }]
-
-[env.staging.vars]
-ALLOW_ORIGIN = "https://pad-staging.ch5.me"
-CLIENT_URL = "https://pad-staging.ch5.me"
-HQ_ENVIRONMENT = "staging"
-HQ_SERVICE_NAME = "padloc-worker"
-
-[[env.staging.kv_namespaces]]
-binding = "EMAIL_KV"
-id = "3a1d6fbb6d9c46fc968ff098c808a3d1"
-
-[[env.staging.d1_databases]]
-binding = "DB"
-database_name = "padloc-staging"
-database_id = "b56e6d4b-1ae1-40c4-8ffb-38f0ee4b95a7"
-migrations_dir = "migrations"
-
-[[env.staging.r2_buckets]]
-binding = "ATTACHMENTS"
-bucket_name = "padloc-attachments-staging"
-
-[[env.staging.kv_namespaces]]
-binding = "HINTS"
-id = "473fbdf54902430db811ef50bd57ce2e"
-
-[[env.staging.durable_objects.bindings]]
-name = "ACCOUNT_LOCK"
-class_name = "AccountLockDO"
-
-[env.production]
-name = "padloc-worker"
-routes = [{ pattern = "api-pad.ch5.me/*", zone_name = "ch5.me" }]
-
-[env.production.vars]
-ALLOW_ORIGIN = "https://pad.ch5.me"
-CLIENT_URL = "https://pad.ch5.me"
-HQ_ENVIRONMENT = "production"
-HQ_SERVICE_NAME = "padloc-worker"
-
-[[env.production.kv_namespaces]]
-binding = "EMAIL_KV"
-id = "0231a8c22d1b4a54a3c4b9e72a68165d"
-
-[[env.production.d1_databases]]
-binding = "DB"
-database_name = "padloc-prod"
-database_id = "f443b7e5-861e-4a4f-9c67-1a33acf5677d"
-migrations_dir = "migrations"
-
-[[env.production.r2_buckets]]
-binding = "ATTACHMENTS"
-bucket_name = "padloc-attachments-prod"
-
-[[env.production.kv_namespaces]]
-binding = "HINTS"
-id = "0abcb21cdf5541b9a7f8c2c35e922a7b"
-
-[[env.production.durable_objects.bindings]]
-name = "ACCOUNT_LOCK"
-class_name = "AccountLockDO"
