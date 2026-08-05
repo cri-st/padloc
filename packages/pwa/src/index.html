@@ -49,22 +49,22 @@
 
             /* Recent Safari (iOS 26+) no longer tints the status bar/toolbar
                from the theme-color meta tag. Instead it samples the actual
-               rendered page: a fixed/sticky element pinned to the viewport
-               edge with a background-color AND a backdrop-filter. This div
-               is that signal. It's plain CSS (prefers-color-scheme), not
-               JS-driven, so the OS light/dark toggle updates it live via a
-               normal media-query re-evaluation + repaint -- which is what
-               Safari's sampling actually reacts to, unlike a JS-mutated
-               meta tag. Colors match --start-background (the surface
-               visible on load) so there's no seam. The theme-color metas
-               above are kept as a fallback for browsers that still honor
-               them (Chrome, Android, older Safari). */
-            #statusbar-color {
+               rendered page: a fixed/sticky element pinned to a viewport
+               edge (top AND bottom) with a background-color AND a
+               backdrop-filter. These divs are that signal. Plain CSS
+               (prefers-color-scheme), not JS-driven, so the OS light/dark
+               toggle updates them live via a normal media-query
+               re-evaluation + repaint -- which is what Safari's sampling
+               actually reacts to, unlike a JS-mutated meta tag. Colors
+               match --start-background (the surface visible on load) so
+               there's no seam. The theme-color metas above are kept as a
+               fallback for browsers that still honor them (Chrome,
+               Android, older Safari). */
+            #statusbar-color-top,
+            #statusbar-color-bottom {
                 position: fixed;
-                top: 0;
                 left: 0;
                 right: 0;
-                height: env(safe-area-inset-top, 0px);
                 background: #212121;
                 -webkit-backdrop-filter: blur(20px);
                 backdrop-filter: blur(20px);
@@ -72,8 +72,19 @@
                 z-index: 2147483647;
             }
 
+            #statusbar-color-top {
+                top: 0;
+                height: env(safe-area-inset-top, 0px);
+            }
+
+            #statusbar-color-bottom {
+                bottom: 0;
+                height: env(safe-area-inset-bottom, 0px);
+            }
+
             @media (prefers-color-scheme: light) {
-                #statusbar-color {
+                #statusbar-color-top,
+                #statusbar-color-bottom {
                     background: #fafafa;
                 }
             }
@@ -119,7 +130,8 @@
         </style>
     </head>
     <body>
-        <div id="statusbar-color" aria-hidden="true"></div>
+        <div id="statusbar-color-top" aria-hidden="true"></div>
+        <div id="statusbar-color-bottom" aria-hidden="true"></div>
         <svg viewBox="0 0 100 100" class="spinner">
             <circle cx="50" cy="50" r="40" />
         </svg>
