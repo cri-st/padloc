@@ -145,6 +145,12 @@ export class WebAuthnServer implements AuthServer {
             transports: webAuthnCredential.transports,
         };
 
+        // registrationOptions carries the full challenge/rp/user/pubKeyCredParams
+        // blob used only during registration. Drop it once we've captured
+        // registrationInfo so it doesn't bloat the persisted auth object
+        // (read+written on every subsequent auth request).
+        delete authenticator.state.registrationOptions;
+
         authenticator.description = this._getDescription(authenticator.type);
     }
 

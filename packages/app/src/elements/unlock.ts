@@ -9,7 +9,7 @@ import { alert, confirm } from "../lib/dialog";
 import "./logo";
 import { customElement, query, state } from "lit/decorators.js";
 import { css, html } from "lit";
-import { authenticate, getPlatformAuthType, supportsPlatformAuthenticator } from "@padloc/core/src/platform";
+import { startAuthRequest, completeAuthRequest, getPlatformAuthType, supportsPlatformAuthenticator } from "@padloc/core/src/platform";
 import { AuthPurpose } from "@padloc/core/src/auth";
 import "./popover";
 
@@ -283,11 +283,24 @@ export class Unlock extends StartForm {
             const rememberedMasterKey = app.state.rememberedMasterKey;
             if (rememberedMasterKey) {
                 try {
-                    const { token } = await authenticate({
+                    const req = await startAuthRequest({
                         purpose: AuthPurpose.AccessKeyStore,
                         type: getPlatformAuthType()!,
                         authenticatorId: rememberedMasterKey.authenticatorId,
                     });
+                    // If the user already unlocked (e.g. typed their master
+                    // password while this server round-trip was in flight),
+                    // skip the WebAuthn ceremony so the OS biometric prompt
+                    // doesn't pop up "out of nowhere" afterwards.
+                    if (!app.state.locked) {
+                        this._bioauthButton.stop();
+                        return;
+                    }
+                    const { token } = await completeAuthRequest(req);
+                    if (!app.state.locked) {
+                        this._bioauthButton.stop();
+                        return;
+                    }
                     await app.unlockWithRememberedMasterKey(token);
                 } catch (e) {
                     this._bioauthButton.fail();
