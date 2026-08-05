@@ -19,6 +19,20 @@ function escapeHtml(value: string): string {
 }
 
 /**
+ * Small stable non-cryptographic digest (FNV-1a, 32-bit) used to bound the
+ * length of the Resend Idempotency-Key. Resend caps that header at 256 chars,
+ * and invite accept URLs (base64 invite blob + token) can exceed that.
+ */
+function hashString(input: string): string {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < input.length; i++) {
+        h ^= input.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16);
+}
+
+/**
  * Renders a message's html/txt bodies. HTML-interpolated values are
  * entity-escaped before substitution — msg.data fields (org name, account
  * display name, etc.) are user-controlled and must never be placed into the
@@ -84,9 +98,14 @@ export class ResendMessenger {
         });
 
         if (!res.ok) {
+            let body = "";
+            try {
+                body = await res.text();
+            } catch {}
             console.error("Resend send failed", {
                 status: res.status,
                 template: msg.template,
+                body,
             });
             throw new Err(ErrorCode.SERVER_ERROR, `Resend request failed [${res.status}]`, {
                 report: true,
@@ -100,7 +119,7 @@ export class ResendMessenger {
         }
         if (msg instanceof JoinOrgInviteMessage || msg instanceof ConfirmMembershipInviteMessage) {
             const data = msg.data as { acceptInviteUrl?: string };
-            return `org-invite:${data.acceptInviteUrl ?? "unknown"}`;
+            return `org-invite:${hashString(data.acceptInviteUrl ?? "unknown")}`;
         }
         return `email:${msg.template}:${Date.now()}`;
     }
