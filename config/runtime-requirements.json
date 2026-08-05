@@ -13,13 +13,13 @@
                     "name": "HQ_SENTRY_DSN",
                     "delivery": "secret",
                     "requiredIn": ["staging", "production"],
-                    "description": "CH5 internal Sentry-compatible DSN. Must target logs.ch5.me or staging.logs.ch5.me; never sentry.io."
+                    "description": "Sentry-compatible DSN for Worker telemetry."
                 },
                 {
                     "name": "HQ_OTLP_ENDPOINT",
                     "delivery": "secret",
                     "requiredIn": ["staging", "production"],
-                    "description": "CH5 internal OTLP HTTP endpoint for traces. Must target logs.ch5.me or staging.logs.ch5.me."
+                    "description": "OTLP HTTP endpoint for Worker traces."
                 },
                 {
                     "name": "HQ_ENVIRONMENT",

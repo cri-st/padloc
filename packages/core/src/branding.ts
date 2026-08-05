@@ -16,9 +16,9 @@
  * `setAppNameOverride()` once per request from `env.APP_NAME` -- see
  * packages/worker/src/server-factory.ts.
  */
-export const APP_NAME = "CH5 Auth";
-export const SUPPORT_EMAIL = "support@ch5.me";
-export const APP_URL = "https://pad.ch5.me";
+export const APP_NAME = "Padloc";
+export const SUPPORT_EMAIL = "support@padloc.app";
+export const APP_URL = "https://padloc.app";
 
 let appNameOverride: string | undefined;
 

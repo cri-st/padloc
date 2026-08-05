@@ -1,7 +1,5 @@
 # Padloc
 
-[![](https://git.ch5.me/ch5/padloc/actions/workflows/run-tests.yml/badge.svg?branch=main)](https://git.ch5.me/ch5/padloc/actions)
-
 Simple, secure password and data management for individuals and teams.
 
 [![Deploy to DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/padloc/padloc/tree/main)
@@ -71,12 +69,12 @@ For a security design overview, check out the
 
 ## HQ Observability
 
-CH5 Padloc Worker HQ instrumentation lives in
-`packages/worker/src/hq-instrumentation.ts`. Runtime contract uses Hush-backed
-Worker secrets `HQ_SENTRY_DSN` and `HQ_OTLP_ENDPOINT`, plus derived vars
-`HQ_ENVIRONMENT`, `HQ_RELEASE`, and `HQ_SERVICE_NAME`. Internal CH5 HQ hosts
-only: `logs.ch5.me` or `staging.logs.ch5.me`. `sentry.io` is rejected on
-startup.
+Padloc Worker HQ instrumentation lives in
+`packages/worker/src/hq-instrumentation.ts`. It is optional and off by default:
+it stays disabled unless the Worker secrets `HQ_SENTRY_DSN` and
+`HQ_OTLP_ENDPOINT` are set (with derived vars `HQ_ENVIRONMENT`, `HQ_RELEASE`,
+`HQ_SERVICE_NAME`), and validates them against the fixed host allowlist in that
+file. Leave the secrets unset to keep it off.
 
 Telemetry surface:
 
@@ -239,7 +237,7 @@ To release a new version, simply:
 
 1. [Update project version](#updating-the-version)
 2. Commit and push.
-3. Run the [Publish Release](https://git.ch5.me/ch5/padloc/actions) action.
+3. Push to `main`; the [Docker Publish (GHCR)](.github/workflows/docker-publish.yml) workflow builds and pushes the images.
 
 ## Licensing
 

@@ -83,9 +83,9 @@ console.log("\n[Open registration]");
 // ── Domain OR invite ────────────────────────────────────────────────────────
 console.log("\n[Domain OR invite]");
 {
-    const c = makeController({ restrictSignup: true, signupAllowDomains: true, signupAllowedDomains: ["ch5.me"] });
-    assertAllowed(c, "user@ch5.me", makeAuth("user@ch5.me"), undefined, "allowlisted domain is allowed");
-    assertAllowed(c, "USER@CH5.ME", makeAuth("USER@CH5.ME"), undefined, "domain match is case-insensitive");
+    const c = makeController({ restrictSignup: true, signupAllowDomains: true, signupAllowedDomains: ["example.com"] });
+    assertAllowed(c, "user@example.com", makeAuth("user@example.com"), undefined, "allowlisted domain is allowed");
+    assertAllowed(c, "USER@EXAMPLE.COM", makeAuth("USER@EXAMPLE.COM"), undefined, "domain match is case-insensitive");
     assertBlocked(c, "user@evil.com", makeAuth("user@evil.com"), undefined, "non-allowlisted domain without invite is blocked");
     assertAllowed(c, "user@evil.com", makeAuth("user@evil.com", [futureInvite()]), undefined, "non-allowlisted domain WITH valid invite is allowed");
     assertBlocked(c, "user@evil.com", makeAuth("user@evil.com", [expiredInvite()]), undefined, "expired invite does not pass");
@@ -94,9 +94,9 @@ console.log("\n[Domain OR invite]");
 // ── Invite-only (domain toggle off) ─────────────────────────────────────────
 console.log("\n[Invite-only]");
 {
-    const c = makeController({ restrictSignup: true, signupAllowDomains: false, signupAllowedDomains: ["ch5.me"] });
-    assertBlocked(c, "user@ch5.me", makeAuth("user@ch5.me"), undefined, "domain ignored when signupAllowDomains=false");
-    assertAllowed(c, "user@ch5.me", makeAuth("user@ch5.me", [futureInvite()]), undefined, "valid invite passes in invite-only mode");
+    const c = makeController({ restrictSignup: true, signupAllowDomains: false, signupAllowedDomains: ["example.com"] });
+    assertBlocked(c, "user@example.com", makeAuth("user@example.com"), undefined, "domain ignored when signupAllowDomains=false");
+    assertAllowed(c, "user@example.com", makeAuth("user@example.com", [futureInvite()]), undefined, "valid invite passes in invite-only mode");
 }
 
 // ── createAccount invite reference must match id + org ───────────────────────

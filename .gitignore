@@ -41,6 +41,7 @@ packages/extension/test-harness/.playwright-html
 packages/extension/test-harness/.playwright-results.json
 packages/worker/.wrangler
 packages/worker/wrangler.local.toml
+identity.local.env
 packages/macos/.build
 packages/macos/.signed-build
 dist-artifacts/
