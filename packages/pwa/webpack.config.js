@@ -92,7 +92,7 @@ module.exports = {
             PL_VENDOR_VERSION: version,
             PL_DISABLE_SW: false,
             PL_CLIENT_SUPPORTED_AUTH_TYPES: "email",
-            PL_TERMS_OF_SERVICE: terms_of_service,
+            PL_TERMS_OF_SERVICE: process.env.PL_TERMS_OF_SERVICE_URL || terms_of_service,
         }),
         new CleanWebpackPlugin(),
         {
