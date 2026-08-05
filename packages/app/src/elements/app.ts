@@ -384,6 +384,18 @@ export class App extends ServiceWorker(StateMixin(AutoSync(ErrorHandling(AutoLoc
         const theme = this.theme;
         document.body.classList.toggle("theme-dark", theme === "dark");
         document.body.classList.toggle("theme-light", theme === "light");
+        this._updateThemeColor();
+    }
+
+    // Keep the browser/OS status-bar (theme-color) in sync with the active
+    // theme's backdrop so the status bar never flashes white on mobile PWAs.
+    private _updateThemeColor() {
+        const backdrop = getComputedStyle(this).backgroundColor;
+        if (!backdrop) {
+            return;
+        }
+        const metas = document.head.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]');
+        metas.forEach((meta) => (meta.content = backdrop));
     }
 
     connectedCallback() {
