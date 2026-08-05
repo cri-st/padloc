@@ -2,7 +2,7 @@
 
 ## Purpose
 
--   CH5-branded fork of Padloc running as a Cloudflare Worker API plus a static
+-   A fork of Padloc running as a Cloudflare Worker API plus a static
     PWA and native Cordova shells.
 -   Shipped surfaces (web app, API base, and native app display name) are
     declared per stage in `config/environment-targets.json` (`targets.<stage>`),
@@ -17,9 +17,7 @@
 -   `packages/cordova` - iOS/Android shell around the web app.
 -   `packages/core` - shared auth, vault, crypto, and messaging logic.
 -   `assets/` - manifests, support docs, and email templates.
--   `config/` - CH5 runtime target map and runtime requirements contract.
--   `.hush/` - repo-local Hush v3 state. Runtime secrets live here for operator
-    flows and are pushed to Cloudflare.
+-   `config/` - runtime target map and runtime requirements contract.
 
 ## Commands
 
@@ -35,29 +33,17 @@
 -   DevMux local status: `npm run svc:status`
 -   Runtime contract check: `npm run runtime-config:check`
 -   Worker dry-run: `npm run worker:deploy:dry-run`
--   Staging deploy: `npm run deploy:staging`
--   Production deploy: `npm run deploy:production`
+-   Deploy: use your own Cloudflare credentials (`CLOUDFLARE_API_TOKEN`) with
+    `wrangler` and a gitignored `packages/worker/wrangler.local.toml`.
 
 ## Secrets
 
--   Cloudflare runtime is authoritative. Worker secrets must exist in Cloudflare
-    even if Hush stores the source values.
--   Repo-local Hush targets:
-    -   `runtime` - shared local/runtime compatibility target
-    -   `runtime-staging` - staging deploy/runtime target
-    -   `runtime-production` - production deploy/runtime target
-    -   `wrangler-deploy-staging` - governed `ch5-padloc-staging` Cloudflare
-        deploy token (least-priv for every staging binding). Consumed by
-        `scripts/deploy-staging`.
-    -   `wrangler-deploy-production` - governed `ch5-padloc-prod` Cloudflare
-        deploy token (least-priv for every production binding). Consumed by
-        `scripts/deploy-production`.
--   Cloudflare deploy-auth is **hush-in-CI** (company standard):
-    `scripts/deploy-<stage>` is the self-contained entrypoint that resolves the
-    governed token from Hush and runs migrations + worker deploy + PWA Pages
-    deploy. The IDENTICAL command runs on a laptop, a harness, or CI. CI holds
-    only `SOPS_AGE_KEY` (to unlock Hush) — never a Cloudflare API-token secret.
-    Rotation = re-mint the token + push.
+-   Cloudflare runtime is authoritative: Worker vars/secrets must exist in
+    Cloudflare for each deployed stage.
+-   Deploy auth uses your own Cloudflare API token (`CLOUDFLARE_API_TOKEN`)
+    passed via the environment to `wrangler`. Real per-stage values (client URL,
+    allowed origin, sender, API keys) are Cloudflare-side Worker vars/secrets;
+    local overrides live in a gitignored `packages/worker/wrangler.local.toml`.
 -   Do not create `.env`, `.dev.vars`, or plaintext secret files.
 -   Production email auth requires a valid `RESEND_API_KEY` and a verified
     `EMAIL_FROM_ADDRESS` sender. Both are delivered as Cloudflare-side Worker
@@ -120,12 +106,11 @@
 -   `packages/worker/src/server-factory.ts` currently falls back to
     `MockMessenger` if either email secret is missing. That is useful locally
     and dangerous in production; keep an eye on it when changing auth.
--   The governed `ch5-padloc-{staging,prod}` deploy tokens are least-privilege
-    for every binding across their stage (Workers Scripts / D1 / KV / R2 Storage
-    Write, Pages Write, Account Settings Read, Workers Tail Read). Add or remove
-    a binding in `packages/worker/wrangler.toml` → re-mint that stage's token
-    (`cf-mint-project-token --project padloc --stage <staging|prod> --dir . --hush-file env/project/<staging|production>`)
-    so the token stays complete; an under-scoped token breaks the deploy.
+-   The Cloudflare deploy token must be least-privilege for every binding across
+    the stage (Workers Scripts / D1 / KV / R2 Storage Write, Pages Write,
+    Account Settings Read, Workers Tail Read). Add or remove a binding in
+    `packages/worker/wrangler.toml` → update the token's scopes to match; an
+    under-scoped token breaks the deploy.
 -   `packages/worker/src/email/templates.ts` is generated from `assets/email/*`;
     regenerate after changing email copy.
 -   Cordova platform plugin fixes applied under `packages/cordova/platforms/`
