@@ -155,6 +155,14 @@ module.exports = {
         new WebpackPwaManifest({
             name: displayName,
             short_name: displayName,
+            // Keep in sync with the <meta name="theme-color"> defaults in
+            // src/index.html (dark: --start-background). Unlike the meta tag,
+            // the manifest can't use prefers-color-scheme media queries, so
+            // this static value only governs the install splash screen /
+            // standalone window chrome before the app's own runtime
+            // (view-aware, theme-aware) update takes over.
+            theme_color: "#212121",
+            background_color: "#212121",
             icons: [
                 {
                     src: resolve(__dirname, assetsDir, "app-icon.png"),
