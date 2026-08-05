@@ -268,6 +268,13 @@ export class D1Storage implements Storage {
                         JSON.stringify(raw),
                         revision,
                     ];
+                } else if (tableName === "key_store_entries") {
+                    // key_store_entries.account_id is NOT NULL -- the generic
+                    // fallback below only writes (id, data), which fails the
+                    // constraint when the app saves a biometric-unlock key.
+                    const accountId = (raw as any).accountId || (raw as any).account_id || "";
+                    stmt = `INSERT INTO ${tableName} (id, account_id, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = ?, data = ?`;
+                    bindings = [obj.id, accountId, JSON.stringify(raw), accountId, JSON.stringify(raw)];
                 } else {
                     // Generic fallback: just id and data
                     stmt = `INSERT INTO ${tableName} (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = ?`;
