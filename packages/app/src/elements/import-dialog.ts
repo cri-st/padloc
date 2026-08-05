@@ -337,6 +337,34 @@ export class ImportDialog extends Dialog<File, void> {
             case imp.KEEPASS.value:
                 this._items = await imp.asKeePass(file);
                 break;
+            case imp.KEEPASS_KDBX.value:
+                this.open = false;
+                const pwd3 = await prompt($l("This file is protected by a password."), {
+                    title: $l("Enter Password"),
+                    placeholder: $l("Enter Password"),
+                    type: "password",
+                    validate: async (pwd: string) => {
+                        try {
+                            this._items = await imp.asKeePassKdbx(file, pwd);
+                        } catch (e: unknown) {
+                            console.error("KeePass import failed", e);
+                            // kdbxweb throws KdbxError (extends Error, adds a `.code` field
+                            // not present on the standard Error type) - narrow structurally.
+                            const code = e instanceof Error ? (e as Error & { code?: string }).code : undefined;
+                            if (code === "InvalidKey") {
+                                throw $l("Wrong Password");
+                            }
+                            throw e instanceof Error ? e.message : $l("Failed to open file");
+                        }
+                        return pwd;
+                    },
+                });
+                this.open = true;
+
+                if (pwd3 === null) {
+                    this.done();
+                }
+                break;
             case imp.NORDPASS.value:
                 this._items = await imp.asNordPass(file);
                 break;

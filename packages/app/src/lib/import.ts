@@ -9,6 +9,7 @@ import { readFileAsText, readFileAsArrayBuffer } from "@padloc/core/src/attachme
 
 import { OnePuxItem } from "./1pux-parser";
 import { BitwardenExport, BitwardenItem } from "./bitwarden-parser";
+import { loadKeePassKdbx, parseKeePassKdbxEntries } from "./keepass-kdbx-parser";
 
 export interface ImportFormat {
     value:
@@ -20,6 +21,7 @@ export interface ImportFormat {
         | "bitwarden"
         | "dashlane"
         | "keepass"
+        | "keepass-kdbx"
         | "nordpass"
         | "icloud"
         | "chrome"
@@ -74,6 +76,11 @@ export const KEEPASS: ImportFormat = {
     label: "KeePass (CSV)",
 };
 
+export const KEEPASS_KDBX: ImportFormat = {
+    value: "keepass-kdbx",
+    label: "KeePass (.kdbx)",
+};
+
 export const NORDPASS: ImportFormat = {
     value: "nordpass",
     label: "NordPass (CSV)",
@@ -103,6 +110,7 @@ export const supportedFormats: ImportFormat[] = [
     BITWARDEN,
     DASHLANE,
     KEEPASS,
+    KEEPASS_KDBX,
     NORDPASS,
     ICLOUD,
     CHROME,
@@ -722,6 +730,27 @@ export async function isKeePass(file: File): Promise<boolean> {
     }
 }
 
+export async function asKeePassKdbx(file: File, password: string, keyFile?: File): Promise<VaultItem[]> {
+    const data = await readFileAsArrayBuffer(file);
+    const keyFileData = keyFile && (await readFileAsArrayBuffer(keyFile));
+    const db = await loadKeePassKdbx(data, password, keyFileData);
+    return parseKeePassKdbxEntries(db);
+}
+
+export async function isKeePassKdbx(file: File): Promise<boolean> {
+    try {
+        // A .kdbx file starts with the 4-byte magic signature 0x9AA2D903 (little-endian),
+        // shared by both KDBX3 and KDBX4 - no need to decrypt/parse anything to detect it.
+        const data = await readFileAsArrayBuffer(file);
+        if (data.byteLength < 4) {
+            return false;
+        }
+        return new DataView(data).getUint32(0, true) === 0x9aa2d903;
+    } catch (error) {
+        return false;
+    }
+}
+
 async function nordPassParseRow(row: string[]): Promise<VaultItem> {
     const nameIndex = 0;
     const urlIndex = 1;
@@ -982,6 +1011,11 @@ export async function isFirefox(file: File): Promise<boolean> {
 }
 
 export async function guessFormat(file: File): Promise<ImportFormat> {
+    // Binary magic-byte check first - cheapest and unambiguous, no risk of
+    // colliding with any of the text/CSV based formats below.
+    if (await isKeePassKdbx(file)) {
+        return KEEPASS_KDBX;
+    }
     // Try to guess 1pux first (won't need parsing)
     if (is1Pux(file)) {
         return ONEPUX;

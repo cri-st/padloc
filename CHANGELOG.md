@@ -20,6 +20,9 @@ and this project adheres to
 -   Increased password generator limits to 12 words for passphrases and 150
     characters for random strings.
 -   Changed default PBKDF2 iterations to 1 Million
+-   You can now import KeePass `.kdbx` files directly (master password
+    protected), including TOTP secrets stored either as a KeePassXC `otp` field
+    or as classic `TimeOtp-Secret*` plugin fields.
 
 ### Bug fixes
 

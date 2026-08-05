@@ -31,7 +31,7 @@ const htmlMetaTags = disableCsp
     : {
           "Content-Security-Policy": {
               "http-equiv": "Content-Security-Policy",
-              content: `default-src 'none'; base-uri 'none'; script-src blob: [REPLACE_SCRIPT]; connect-src ${serverUrl} https://api.pwnedpasswords.com [REPLACE_CONNECT]; style-src 'unsafe-inline'; font-src [REPLACE_FONT]; object-src blob:; frame-src blob:; img-src [REPLACE_IMG] blob: data: https://icons.duckduckgo.com; manifest-src [REPLACE_MANIFEST]; worker-src ${pwaUrl}/sw.js;`,
+              content: `default-src 'none'; base-uri 'none'; script-src blob: 'wasm-unsafe-eval' [REPLACE_SCRIPT]; connect-src ${serverUrl} https://api.pwnedpasswords.com [REPLACE_CONNECT]; style-src 'unsafe-inline'; font-src [REPLACE_FONT]; object-src blob:; frame-src blob:; img-src [REPLACE_IMG] blob: data: https://icons.duckduckgo.com; manifest-src [REPLACE_MANIFEST]; worker-src ${pwaUrl}/sw.js;`,
           },
       };
 
@@ -54,6 +54,12 @@ module.exports = {
             "@padloc/core": resolve(rootDir, "packages/core"),
             "@padloc/app": resolve(rootDir, "packages/app"),
             "@padloc/locale": resolve(rootDir, "packages/locale"),
+        },
+        fallback: {
+            // kdbxweb's crypto-engine.ts only touches Node's `crypto` module inside an
+            // `else` branch that's dead code whenever `crypto.subtle` exists (i.e. every
+            // browser this PWA targets) - no polyfill needed, just don't bundle it.
+            crypto: false,
         },
     },
     module: {
