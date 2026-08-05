@@ -387,15 +387,21 @@ export class App extends ServiceWorker(StateMixin(AutoSync(ErrorHandling(AutoLoc
         this._updateThemeColor();
     }
 
-    // Keep the browser/OS status-bar (theme-color) in sync with the active
-    // theme's backdrop so the status bar never flashes white on mobile PWAs.
+    // Keep the browser/OS status-bar (theme-color) in sync with the surface
+    // currently at the top edge so the status bar reads as a seamless
+    // continuation of the app rather than a separate strip. On the start/unlock
+    // screen that surface is the full-bleed start view (--start-background);
+    // everywhere else it is the app backdrop.
     private _updateThemeColor() {
-        const backdrop = getComputedStyle(this).backgroundColor;
-        if (!backdrop) {
+        const onStartScreen = ["start", "login", "signup", "recover", "unlock"].includes(this._page);
+        const startView = this.renderRoot.querySelector("#startView") as HTMLElement | null;
+        const surface = (onStartScreen && startView) || this;
+        const color = getComputedStyle(surface).backgroundColor;
+        if (!color) {
             return;
         }
         const metas = document.head.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]');
-        metas.forEach((meta) => (meta.content = backdrop));
+        metas.forEach((meta) => (meta.content = color));
     }
 
     connectedCallback() {
