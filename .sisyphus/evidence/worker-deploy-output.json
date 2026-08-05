@@ -13,10 +13,10 @@
         "env.HINTS (0abcb21cdf5541b9a7f8c2c35e922a7b) - KV Namespace",
         "env.DB (padloc-prod) - D1 Database",
         "env.ATTACHMENTS (padloc-attachments-prod) - R2 Bucket",
-        "env.ALLOW_ORIGIN (\"https://pad.ch5.me\") - Environment Variable"
+        "env.ALLOW_ORIGIN (\"https://app.example.com\") - Environment Variable"
     ],
     "warnings": ["workers_dev is enabled by default (not disabled in wrangler.toml)", "Preview URLs are enabled"],
     "token_used": "bootstrap Account API Token (redacted - stored in 1Password)",
-    "custom_domain_status": "api-pad.ch5.me DNS CNAME created but Workers route not yet bound (requires User API Token or dashboard)",
+    "custom_domain_status": "api.example.com DNS CNAME created but Workers route not yet bound (requires User API Token or dashboard)",
     "notes": "Bootstrap token was required because project deploy token lacks Workers KV Storage Write permission (see cf-project.sh mint-deploy-token — missing workers_kv_storage_write in _resolve_deploy_pg)."
 }

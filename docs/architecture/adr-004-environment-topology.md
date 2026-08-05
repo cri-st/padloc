@@ -132,8 +132,8 @@ wrangler d1 execute DB --local --file=./migrations/001_initial.sql
 | Environment | Worker Hostname          | PWA Hostname         |
 | ----------- | ------------------------ | -------------------- |
 | dev         | `localhost:8787`         | `localhost:3000`     |
-| staging     | `api-pad-staging.ch5.me` | `pad-staging.ch5.me` |
-| production  | `api-pad.ch5.me`         | `pad.ch5.me`         |
+| staging     | `api-staging.example.com` | `staging.example.com` |
+| production  | `api.example.com`         | `app.example.com`         |
 
 The exact production hostnames are determined when the project is deployed and
 DNS is configured. The pattern follows the environment topology principle:

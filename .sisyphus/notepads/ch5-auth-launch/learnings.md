@@ -2,8 +2,8 @@
 
 -   Live runtime source of truth checked first: `packages/worker/src/env.ts`,
     `packages/worker/wrangler.toml`, and `packages/pwa/webpack.config.js`.
--   Freeze production split-host topology as `pad.ch5.me` for the PWA and
-    `api-pad.ch5.me` for the Worker API. This fits the current runtime contract
+-   Freeze production split-host topology as `app.example.com` for the PWA and
+    `api.example.com` for the Worker API. This fits the current runtime contract
     because the PWA already consumes a full backend origin via `PL_SERVER_URL`,
     and the Worker only exposes a direct CORS allowlist via `ALLOW_ORIGIN`; no
     same-origin proxy is required.
@@ -28,7 +28,7 @@
     remain non-blocking unless a runtime task explicitly needs them for a
     shipped path.
 -   Note: inherited planning text mentioned `api-pad.ch3.me`; treat that as
-    stale/typo. Repo freeze for today is `api-pad.ch5.me`.
+    stale/typo. Repo freeze for today is `api.example.com`.
 
 ## 2026-05-19 bundle identity rename (T1 follow-through)
 
@@ -80,20 +80,20 @@ rg -n "app\.padloc" assets/manifest.json packages/cordova/config.xml
 
 ### Changes made
 
--   `packages/pwa/webpack.config.js`: `PL_SUPPORT_EMAIL` → `support@ch5.ai`
--   `packages/cordova/webpack.config.js`: `PL_SUPPORT_EMAIL` → `support@ch5.ai`
--   `assets/support.md`: All `padloc.app` URLs replaced with `ch5.ai`
+-   `packages/pwa/webpack.config.js`: `PL_SUPPORT_EMAIL` → `support@padloc.app`
+-   `packages/cordova/webpack.config.js`: `PL_SUPPORT_EMAIL` → `support@padloc.app`
+-   `assets/support.md`: All `padloc.app` URLs replaced with `example.com`
     equivalents:
-    -   Website → `https://ch5.ai/`
-    -   Blog → `https://ch5.ai/blog/`
-    -   TOS → `https://ch5.ai/tos/`
-    -   Privacy → `https://ch5.ai/privacy/`
-    -   Contact Support → `mailto:support@ch5.ai`
-    -   User Manual → `https://docs.ch5.ai/manual/`
-    -   FAQ → `https://docs.ch5.ai/faq/`
+    -   Website → `https://example.com/`
+    -   Blog → `https://example.com/blog/`
+    -   TOS → `https://example.com/tos/`
+    -   Privacy → `https://example.com/privacy/`
+    -   Contact Support → `mailto:support@padloc.app`
+    -   User Manual → `https://docs.example.com/manual/`
+    -   FAQ → `https://docs.example.com/faq/`
 -   `assets/email/*.html` and `*.txt` source templates: Email footers updated
     from `Padloc (https://padloc.app) support@padloc.app` →
-    `CH5 (https://ch5.ai) support@ch5.ai`
+    `CH5 (https://example.com) support@padloc.app`
 -   `assets/email/*.html` and `*.txt`: Body text references to "Padloc
     organization" and "in Padloc" changed to "CH5 organization" / "in CH5"
 -   `packages/worker/src/email/templates.ts`: Regenerated from updated source
@@ -169,15 +169,15 @@ rg -n "app\.padloc" assets/manifest.json packages/cordova/config.xml
 ### Changes made
 
 -   `packages/worker/wrangler.toml`: added production
-    `ALLOW_ORIGIN = "https://pad.ch5.me"` under `[env.production.vars]`.
+    `ALLOW_ORIGIN = "https://app.example.com"` under `[env.production.vars]`.
 -   `packages/core/src/otp.ts`: changed the default TOTP issuer from `Padloc` to
     `CH5` so shipped otpauth URLs no longer brand as Padloc.
 -   `packages/core/src/server.ts`: changed `ServerConfig.clientUrl` default to
-    `https://pad.ch5.me`; org invite/open-app links now inherit the CH5 app
+    `https://app.example.com`; org invite/open-app links now inherit the CH5 app
     hostname.
 -   `packages/server/src/auth/webauthn.ts`: set WebAuthn defaults to
-    `rpName = "CH5 Auth"`, `rpID = "pad.ch5.me"`,
-    `origin = "https://pad.ch5.me"`.
+    `rpName = "CH5 Auth"`, `rpID = "app.example.com"`,
+    `origin = "https://app.example.com"`.
 -   `packages/server/src/init.ts`: when WebAuthn config is synthesized from
     `clientUrl`, keep `rpName` CH5-branded while deriving `rpID` and `origin`
     from the active client host.
@@ -185,8 +185,8 @@ rg -n "app\.padloc" assets/manifest.json packages/cordova/config.xml
 ### Findings
 
 -   `clientUrl` is the user-facing app base, not the API origin. For split-host
-    launch it must stay `https://pad.ch5.me`; setting it to
-    `https://api-pad.ch5.me` would break email links and WebAuthn origin
+    launch it must stay `https://app.example.com`; setting it to
+    `https://api.example.com` would break email links and WebAuthn origin
     defaults.
 -   `packages/worker/src/email/templates.ts` contains only runtime placeholders
     like `acceptInviteUrl`, `confirmMemberUrl`, and `openAppUrl`; no hardcoded
@@ -210,7 +210,7 @@ rg -n "app\.padloc" assets/manifest.json packages/cordova/config.xml
 -   Deployed Worker to production using bootstrap Account API Token (stored in
     1Password `CLOUD_FLARE_MASTER_API_TOKEN`; redacted here for security — never
     commit raw Cloudflare tokens).
--   Created DNS CNAME for `api-pad.ch5.me` →
+-   Created DNS CNAME for `api.example.com` →
     `padloc-worker.hassoncs.workers.dev` via `cf-surface.sh dns-upsert-cname`.
 
 ### Verified
@@ -218,17 +218,17 @@ rg -n "app\.padloc" assets/manifest.json packages/cordova/config.xml
 -   **Healthcheck**: `https://padloc-worker.hassoncs.workers.dev/healthcheck`
     returns
     `{"status":"ok","version":"0.0.0","d1":"ok","r2":"ok","resend":"ok"}` ✅
--   **CORS**: Origin `https://pad.ch5.me` is allowed
-    (`access-control-allow-origin: https://pad.ch5.me`) ✅
--   **ALLOW_ORIGIN**: Correctly set to `https://pad.ch5.me` in `wrangler.toml`
+-   **CORS**: Origin `https://app.example.com` is allowed
+    (`access-control-allow-origin: https://app.example.com`) ✅
+-   **ALLOW_ORIGIN**: Correctly set to `https://app.example.com` in `wrangler.toml`
     `[env.production.vars]` ✅
 -   **Secrets**: `RESEND_API_KEY` (from 1Password Private `RESEND_API_KEY` item)
-    and `EMAIL_FROM_ADDRESS=support@ch5.ai` are set ✅
+    and `EMAIL_FROM_ADDRESS=support@padloc.app` are set ✅
 
-### Blocker: `api-pad.ch5.me` route not bound
+### Blocker: `api.example.com` route not bound
 
-**Symptom**: `curl https://api-pad.ch5.me/healthcheck` → HTTP 522 (origin
-timeout). DNS resolves (CNAME created), TLS cert is valid (matched by `*.ch5.me`
+**Symptom**: `curl https://api.example.com/healthcheck` → HTTP 522 (origin
+timeout). DNS resolves (CNAME created), TLS cert is valid (matched by `*.example.com`
 wildcard), but Cloudflare proxy cannot reach the origin Worker because no Worker
 route/custom domain binding exists.
 
@@ -240,7 +240,7 @@ them (POST fails with
 `10405 Method not allowed for this authentication scheme`).
 
 **Fix**: Open Cloudflare Dashboard → Workers → padloc-worker → Settings →
-Triggers → Custom Domains → Add domain → enter `api-pad.ch5.me`. Cloudflare will
+Triggers → Custom Domains → Add domain → enter `api.example.com`. Cloudflare will
 automatically provision the TLS certificate and create the route binding.
 
 **Alternative**: Obtain a Cloudflare User API Token with `workers:write` scope
@@ -264,18 +264,18 @@ The following secrets were NOT in repo-local Hush at deploy time:
 -   `RESEND_API_KEY`: Retrieved from 1Password Private vault item
     "RESEND_API_KEY" (credential redacted — retrieve from 1Password
     Private/RESEND_API_KEY, field "credential").
--   `EMAIL_FROM_ADDRESS`: Set to `support@ch5.ai` (derived from CH5 branding;
+-   `EMAIL_FROM_ADDRESS`: Set to `support@padloc.app` (derived from CH5 branding;
     not found in 1Password)
 
 **Action item**: Store `RESEND_API_KEY` in repo-local Hush under the worker
 target so future deploys don't require manual secret retrieval.
 
-## 2026-05-19 T5: PWA build + Cloudflare Pages deploy + pad.ch5.me DNS
+## 2026-05-19 T5: PWA build + Cloudflare Pages deploy + app.example.com DNS
 
 ### Build
 
 ```sh
-PL_SERVER_URL=https://api-pad.ch5.me PL_PWA_URL=https://pad.ch5.me \
+PL_SERVER_URL=https://api.example.com PL_PWA_URL=https://app.example.com \
   npm run build --prefix packages/pwa
 ```
 
@@ -283,11 +283,11 @@ Result: webpack 5.52.0 compiled successfully (47 assets, 879 modules).
 
 ### Verification
 
-**`api-pad.ch5.me` is correctly baked into built output:**
+**`api.example.com` is correctly baked into built output:**
 
--   `packages/pwa/dist/main.js`: `new AjaxSender("https://api-pad.ch5.me")`
+-   `packages/pwa/dist/main.js`: `new AjaxSender("https://api.example.com")`
 -   `packages/pwa/dist/index.html` CSP:
-    `connect-src https://api-pad.ch5.me https://api.pwnedpasswords.com`
+    `connect-src https://api.example.com https://api.pwnedpasswords.com`
 
 **No `/server` runtime references** in built JS (only found in `.map` files).
 
@@ -300,17 +300,17 @@ these remain deferred and do not block the shipped PWA+Worker path.
 
 -   Created Pages project `padloc-pwa` (production branch: `main`)
 -   Deployed `packages/pwa/dist` (59 files, 5.56 sec) → `padloc-pwa.pages.dev`
--   Attached custom domain `pad.ch5.me` (status: `active`, validation: HTTP, CA:
+-   Attached custom domain `app.example.com` (status: `active`, validation: HTTP, CA:
     Google)
--   Created DNS CNAME: `pad.ch5.me` → `padloc-pwa.pages.dev` (proxied=false,
+-   Created DNS CNAME: `app.example.com` → `padloc-pwa.pages.dev` (proxied=false,
     record id: `71b6d4c6a332fa8d9e40eda7404236b3`)
--   `pad.ch5.me` live over HTTPS: HTTP/2 200, `server: cloudflare`
+-   `app.example.com` live over HTTPS: HTTP/2 200, `server: cloudflare`
 
-### Blocker: `api-pad.ch5.me` not accessible
+### Blocker: `api.example.com` not accessible
 
-`curl https://api-pad.ch5.me` returns "Could not resolve host". The Worker
-(`padloc-worker`) has no custom domain route or DNS record for `api-pad.ch5.me`.
-The PWA is correctly compiled to call `https://api-pad.ch5.me`, but the Worker
+`curl https://api.example.com` returns "Could not resolve host". The Worker
+(`padloc-worker`) has no custom domain route or DNS record for `api.example.com`.
+The PWA is correctly compiled to call `https://api.example.com`, but the Worker
 must be deployed with a route/custom-domain binding for the API to be reachable.
 This is a separate setup task from the PWA deploy.
 
@@ -324,10 +324,10 @@ CLOUDFLARE_API_TOKEN="$(hush run -- bash -c 'printf "%s" "$CLOUDFLARE_API_TOKEN"
 
 cf-surface.sh pages-deploy padloc-pwa packages/pwa/dist main
 
-cf-surface.sh pages-domain-attach padloc-pwa pad.ch5.me
+cf-surface.sh pages-domain-attach padloc-pwa app.example.com
 
 cf-surface.sh dns-upsert-cname padloc de2e5d88a0d7eca9dfe423318e2c25ea \
-  pad.ch5.me padloc-pwa.pages.dev --proxied false
+  app.example.com padloc-pwa.pages.dev --proxied false
 ```
 
 No `wrangler pages project create` or `wrangler pages deploy` ad-hoc commands

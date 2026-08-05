@@ -23,7 +23,7 @@ export default defineConfig({
         ["json", { outputFile: path.resolve(__dirname, ".playwright-results.json") }],
     ],
     use: {
-        baseURL: process.env.PL_SERVER_URL || "https://api-pad-staging.ch5.me",
+        baseURL: process.env.PL_SERVER_URL || "https://api-staging.example.com",
     },
     projects: [
         {

@@ -1,7 +1,7 @@
 {
     "timestamp": "2026-05-19T17:05:39Z",
     "dns_record": {
-        "name": "api-pad.ch5.me",
+        "name": "api.example.com",
         "type": "CNAME",
         "content": "padloc-worker.hassoncs.workers.dev",
         "proxied": true,
@@ -9,15 +9,15 @@
         "zone_id": "de2e5d88a0d7eca9dfe423318e2c25ea"
     },
     "resolution_test": {
-        "command": "dig @1.1.1.1 +short api-pad.ch5.me",
+        "command": "dig @1.1.1.1 +short api.example.com",
         "result": "104.21.45.65 and 172.67.210.189 (Cloudflare anycast)",
         "local_resolver_status": "propagating (not yet visible to all resolvers)"
     },
     "tls_test": {
-        "command": "curl -v --resolve api-pad.ch5.me:443:104.21.45.65 https://api-pad.ch5.me/healthcheck",
-        "result": "TLS handshake successful. Certificate matches *.ch5.me wildcard. HTTP 522 (origin timeout).",
-        "certificate_subject": "CN=ch5.me",
-        "certificate_san": "api-pad.ch5.me matched by *.ch5.me"
+        "command": "curl -v --resolve api.example.com:443:104.21.45.65 https://api.example.com/healthcheck",
+        "result": "TLS handshake successful. Certificate matches *.example.com wildcard. HTTP 522 (origin timeout).",
+        "certificate_subject": "CN=example.com",
+        "certificate_san": "api.example.com matched by *.example.com"
     },
-    "notes": "DNS CNAME created successfully. TLS cert is valid. HTTP 522 indicates Cloudflare proxy accepted connection but has no Worker route binding for padloc-worker at api-pad.ch5.me. BLOCKER: Need Cloudflare dashboard to bind custom domain (Workers domains API requires User API Token, not Account API Token)."
+    "notes": "DNS CNAME created successfully. TLS cert is valid. HTTP 522 indicates Cloudflare proxy accepted connection but has no Worker route binding for padloc-worker at api.example.com. BLOCKER: Need Cloudflare dashboard to bind custom domain (Workers domains API requires User API Token, not Account API Token)."
 }

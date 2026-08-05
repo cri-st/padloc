@@ -26,7 +26,7 @@ Everything before and after the sign-in is scripted below.
 ```bash
 cd /Users/hassoncs/src/ch5/padloc
 # 0. fresh extension against staging server (operating rule)
-PL_SERVER_URL=https://api-pad-staging.ch5.me npm --prefix packages/extension run build
+PL_SERVER_URL=https://api-staging.example.com npm --prefix packages/extension run build
 npm run web-extension:preflight
 
 # 1. read current Google passkey state (needs the human already signed in)

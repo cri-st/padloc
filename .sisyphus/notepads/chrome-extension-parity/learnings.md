@@ -352,7 +352,7 @@
     keys.
 -   **`PL_SERVER_URL` is baked at build time**: `webpack.DefinePlugin` replaces
     `process.env.PL_SERVER_URL` during webpack. The CI workflow passes
-    `PL_SERVER_URL=https://api-pad-staging.ch5.me` to the build step so the
+    `PL_SERVER_URL=https://api-staging.example.com` to the build step so the
     running extension uses staging, not localhost.
 -   **Content script on `file://`**: The `<all_urls>` host permission covers
     `file://` URLs. The content script attaches after `networkidle`; an
@@ -395,7 +395,7 @@
     `build-web-extension.yml` were already correct. The gap was `run-tests.yml`
     not running extension tests on PRs.
 -   **`PL_SERVER_URL` is build-time only**: The CI workflows pass
-    `PL_SERVER_URL=https://api-pad-staging.ch5.me` to the build step so the
+    `PL_SERVER_URL=https://api-staging.example.com` to the build step so the
     running extension uses staging. This is already documented in the harness
     config.
 -   **Two CI workflows cover extension changes**: `build-web-extension.yml`
@@ -453,7 +453,7 @@
 **Issue 1 — `process.env.PL_SERVER_URL` in MV3 SW (background.ts):**
 
 -   `packages/extension/src/background.ts:13` — Added
-    `const API_BASE_URL = "https://api-pad.ch5.me";`
+    `const API_BASE_URL = "https://api.example.com";`
 -   `packages/extension/src/background.ts:30` — Changed
     `new AjaxSender(process.env.PL_SERVER_URL!)` →
     `new AjaxSender(API_BASE_URL)`

@@ -226,7 +226,7 @@ For hot-reload development, rebuild manually or use a file watcher.
     record/authenticator and the HTTPS-only main/isolated-world bridge with
     bounded native fallback, nonce-bound approval, recent password/biometric
     verification, RP option validation, and encrypted-vault persistence. The
-    controlled `ch5.me` RP E2E creates five discoverable ES256 credentials,
+    controlled `example.com` RP E2E creates five discoverable ES256 credentials,
     signs a fresh assertion with an exact redacted user choice, verifies the
     signature and RP hash in Chromium, preserves the multi-device zero counter,
     and reloads the credentials from encrypted vault storage. Ambiguous requests

@@ -57,7 +57,7 @@ Verification (local, autonomous):
 
 ```bash
 npm --prefix packages/extension run check:source   # preflight + tsc + readiness + 20 passing
-PL_SERVER_URL=https://api-pad-staging.ch5.me npm --prefix packages/extension run build
+PL_SERVER_URL=https://api-staging.example.com npm --prefix packages/extension run build
 ```
 
 ## Corrected Gate 1 Runbook (needs a human)

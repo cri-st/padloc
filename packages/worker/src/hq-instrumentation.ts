@@ -48,7 +48,7 @@ interface HqState {
     pending: Set<Promise<void>>;
 }
 
-const INTERNAL_HOSTS = new Set(["logs.ch5.me", "staging.logs.ch5.me"]);
+const INTERNAL_HOSTS = new Set(["logs.example.com", "staging.logs.example.com"]);
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const state: HqState = {
     status: "disabled",
@@ -193,7 +193,7 @@ function parseInternalSentryDsn(dsn: string, allowLocalEndpoints: boolean): stri
     }
     assertInternalHost(url, "HQ_SENTRY_DSN", allowLocalEndpoints);
     if (/sentry\.io$/i.test(url.hostname) || url.hostname.includes("ingest.sentry.io")) {
-        throw new Error("HQ instrumentation mis-wired: HQ_SENTRY_DSN must target logs.ch5.me, not sentry.io.");
+        throw new Error("HQ instrumentation mis-wired: HQ_SENTRY_DSN must target logs.example.com, not sentry.io.");
     }
     const pathParts = url.pathname.split("/").filter(Boolean);
     const projectId = pathParts[pathParts.length - 1] || url.username || "padloc-worker";
@@ -220,7 +220,7 @@ function assertInternalHost(url: URL, label: string, allowLocalEndpoints: boolea
     const host = url.hostname.toLowerCase();
     if (INTERNAL_HOSTS.has(host)) return;
     if (allowLocalEndpoints && LOCAL_HOSTS.has(host)) return;
-    throw new Error(`HQ instrumentation mis-wired: ${label} must target logs.ch5.me or staging.logs.ch5.me.`);
+    throw new Error(`HQ instrumentation mis-wired: ${label} must target logs.example.com or staging.logs.example.com.`);
 }
 
 async function sendSentryEvent(

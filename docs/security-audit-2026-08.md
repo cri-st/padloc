@@ -1,7 +1,7 @@
 # CH5 Auth (Padloc fork) — Security Audit, August 2026
 
-**Scope:** `packages/core`, `packages/worker` (production surface: `pad.ch5.me` /
-`api-pad.ch5.me`), `packages/app` (client shared by pwa/extension/cordova/electron),
+**Scope:** `packages/core`, `packages/worker` (production surface: `app.example.com` /
+`api.example.com`), `packages/app` (client shared by pwa/extension/cordova/electron),
 `packages/server` (legacy self-host Docker path), dependency tree, Docker/self-host
 deploy config.
 
@@ -105,7 +105,7 @@ status.
 | 3.1 | DOMPurify resolved to **2.4.1** (app pins `^2.3.3`, server pins `2.3.8`) at both call sites with **no `ALLOWED_TAGS`/`ALLOWED_ATTR` restriction** (only additive `ADD_TAGS`/`ADD_ATTR`), rendering stored markdown/rich-content via `unsafeHTML`. This version predates ~2 years and dozens of disclosed DOMPurify XSS/mXSS/prototype-pollution bypasses (fixed through the current 3.4.x line — see the `npm audit` advisory list in this repo's history). Not a demonstrated bypass today, but it maximizes exposure to any future or already-fixed-upstream bypass. | `packages/app/src/lib/markdown.ts:86`, `elements/rich-content.ts:41-42` | production PWA, shared vault notes |
 | 3.2 | ~~Reverse tabnabbing~~ — **FIXED 2026-08-04**: `WebPlatform.openExternalUrl()` calls `window.open(url, "_blank")` **without `noopener`**. Every link inside rendered markdown (shared vault note fields, editable by any org member) routes through this. A malicious link opens with a live `window.opener`, letting the new tab redirect the original authenticated Padloc tab to a phishing/credential page. The DOMPurify `afterSanitizeAttributes` hook forces `target="_blank"` on links but never pairs it with `rel="noopener noreferrer"`, compounding this. | `packages/app/src/lib/platform.ts:177-179`, `lib/markdown.ts:73-79` | production PWA |
 | 3.3 | ~~`Session.expires` never set~~ — **FIXED 2026-08-04**: was defined but **never set** by `completeCreateSession` (`core/src/server.ts:667-703`); the only real lifecycle control was a 14-day **idle-timeout** sweep, not an absolute cap. A session used at least once every 14 days was valid forever. Raised blast radius of any session-key exfiltration (e.g. via 3.1/3.2). | `core/src/session.ts:87-182`, `core/src/server.ts:196-199,2049-2075` | production worker + self-host (shared core) |
-| 3.4 | ~~WebAuthn counter persisted before verify~~ — **FIXED 2026-08-04**: signature counter was persisted **before** the `verified` check — a failed/replayed assertion could corrupt the stored clone-detection baseline. Self-host only; the Worker doesn't register `WebAuthnServer` at all (only Email + TOTP), so `pad.ch5.me` was never affected. | `packages/server/src/auth/webauthn.ts:171-188` | self-host Docker only |
+| 3.4 | ~~WebAuthn counter persisted before verify~~ — **FIXED 2026-08-04**: signature counter was persisted **before** the `verified` check — a failed/replayed assertion could corrupt the stored clone-detection baseline. Self-host only; the Worker doesn't register `WebAuthnServer` at all (only Email + TOTP), so `app.example.com` was never affected. | `packages/server/src/auth/webauthn.ts:171-188` | self-host Docker only |
 | 3.5 | Production brute-force protection is a **single global per-IP rate limit** (100 req/60s, uniform across all routes, not login-specific), and it **fails open** if the KV binding is unavailable ("prevents the limiter from becoming a single point of failure" — by design, but that design choice means auth endpoints get zero protection during a KV outage). Combined with 2.1 being dead, there is no real per-account throttling for password/TOTP guessing in production. | `packages/worker/src/rate-limiter.ts:1-49`, `transport.ts:109-121` | production worker |
 
 ---

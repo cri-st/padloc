@@ -8,7 +8,7 @@ import { verifyAssertion, verifyRegistration } from "../test/passkey-rp/shared-v
 
 const EXT_DIST = path.resolve(__dirname, "../dist");
 const LOGIN_FIXTURE = path.join(__dirname, "fixtures", "login-form.html");
-const LOGIN_URL = "https://passkey-test.ch5.me/";
+const LOGIN_URL = "https://passkey-test.example.com/";
 const execFileAsync = promisify(execFile);
 
 type ExtensionFixtures = {
@@ -371,7 +371,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
                     publicKey: {
                         challenge: registrationChallenge,
                         rp: {
-                            id: "ch5.me",
+                            id: "example.com",
                             name: '<img src=x onerror="globalThis.__padlocPromptInjected=true"> CH5 Passkey Canary',
                         },
                         user: {
@@ -429,7 +429,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
         );
         expect(approvalResponse).toMatchObject({
             type: "getPasskeyApprovalPromptResponse",
-            prompt: { operation: "create", rpId: "ch5.me" },
+            prompt: { operation: "create", rpId: "example.com" },
         });
         await popup.evaluate(async () => {
             await (document.querySelector("pl-extension-app") as any)._checkForPasskeyApproval();
@@ -453,7 +453,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
             "Password fallback must retain the background approval prompt"
         ).toMatchObject({
             type: "getPasskeyApprovalPromptResponse",
-            prompt: { operation: "create", rpId: "ch5.me" },
+            prompt: { operation: "create", rpId: "example.com" },
         });
         await popup.evaluate(async (masterPassword) => {
             await (window as any).app.unlock(masterPassword);
@@ -483,7 +483,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
             credentialID: Buffer.from(createResult.credential.rawId, "base64url"),
             expectedChallenge: registrationChallenge,
             expectedOrigin: LOGIN_URL.slice(0, -1),
-            expectedRpID: "ch5.me",
+            expectedRpID: "example.com",
             requireUV: true,
             requireBackupEligible: true,
             requireBackupState: true,
@@ -498,7 +498,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
                 .get({
                     publicKey: {
                         challenge: assertionChallenge,
-                        rpId: "ch5.me",
+                        rpId: "example.com",
                         allowCredentials: [{ type: "public-key", id: registration.rawId, transports: ["internal"] }],
                         userVerification: "required",
                         timeout: 60_000,
@@ -543,7 +543,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
                         signedData
                     );
                     const expectedRpHash = new Uint8Array(
-                        await crypto.subtle.digest("SHA-256", new TextEncoder().encode("ch5.me"))
+                        await crypto.subtle.digest("SHA-256", new TextEncoder().encode("example.com"))
                     );
                     const rpHashMatches = expectedRpHash.every((byte, index) => authenticatorData[index] === byte);
                     const clientData = JSON.parse(new TextDecoder().decode(response.clientDataJSON));
@@ -578,7 +578,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
             verified: true,
             rpHashMatches: true,
             clientType: "webauthn.get",
-            origin: "https://passkey-test.ch5.me",
+            origin: "https://passkey-test.example.com",
             idMatches: true,
             credential: expect.any(Object),
         });
@@ -596,7 +596,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
                 publicKeyJwk: registered.publicKeyJwk,
                 expectedChallenge: assertionChallenge,
                 expectedOrigin: LOGIN_URL.slice(0, -1),
-                expectedRpID: "ch5.me",
+                expectedRpID: "example.com",
                 requireUV: true,
                 requireBackupEligible: true,
                 requireBackupState: true,
@@ -615,7 +615,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
                         .create({
                             publicKey: {
                                 challenge: crypto.getRandomValues(new Uint8Array(32)),
-                                rp: { id: "ch5.me", name: "CH5 Passkey Canary" },
+                                rp: { id: "example.com", name: "CH5 Passkey Canary" },
                                 user: {
                                     id: new TextEncoder().encode(nextAccount),
                                     name: nextAccount,
@@ -670,7 +670,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
                 .get({
                     publicKey: {
                         challenge: crypto.getRandomValues(new Uint8Array(32)),
-                        rpId: "ch5.me",
+                        rpId: "example.com",
                         userVerification: "required",
                         timeout: 60_000,
                     },
@@ -726,7 +726,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
         expect(persisted).toEqual(
             expect.arrayContaining([
                 {
-                    rpId: "ch5.me",
+                    rpId: "example.com",
                     userName: email,
                     counter: 0,
                     counterPolicy: "none",
@@ -736,7 +736,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
                     privateKeyPresent: true,
                 },
                 {
-                    rpId: "ch5.me",
+                    rpId: "example.com",
                     userName: selectedAccount,
                     counter: 0,
                     counterPolicy: "none",
@@ -793,7 +793,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
                         .get({
                             publicKey: {
                                 challenge: new Uint8Array(challenge),
-                                rpId: "ch5.me",
+                                rpId: "example.com",
                                 allowCredentials: [
                                     { type: "public-key", id: decode(credentialID), transports: ["internal"] },
                                 ],
@@ -827,7 +827,7 @@ test.describe("Extension smoke — unpacked extension runtime", () => {
                     publicKeyJwk: registered.publicKeyJwk,
                     expectedChallenge: new Uint8Array(restartChallenge),
                     expectedOrigin: LOGIN_URL.slice(0, -1),
-                    expectedRpID: "ch5.me",
+                    expectedRpID: "example.com",
                     requireUV: true,
                     requireBackupEligible: true,
                     requireBackupState: true,

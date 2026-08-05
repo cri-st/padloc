@@ -138,7 +138,7 @@ if [[ -n "$unsafe_diagnostic_matches" ]]; then
 fi
 
 echo "passkey proof: production extension artifact restoration"
-PL_SERVER_URL=https://api-pad.ch5.me PL_BUILD_ENV=production "${npm_command[@]}" run web-extension:build >/dev/null
+PL_SERVER_URL=https://api.example.com PL_BUILD_ENV=production "${npm_command[@]}" run web-extension:build >/dev/null
 test -f packages/extension/dist/manifest.json
 if find packages/extension/dist -name '*.map' -print -quit | grep -q .; then
   echo "production extension build contains source maps" >&2

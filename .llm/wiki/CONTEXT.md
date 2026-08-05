@@ -9,10 +9,10 @@
 
 ## Live Surfaces
 
--   Production web: `https://pad.ch5.me`
--   Production API: `https://api-pad.ch5.me`
--   Staging web: `https://pad-staging.ch5.me`
--   Staging API: `https://api-pad-staging.ch5.me`
+-   Production web: `https://app.example.com`
+-   Production API: `https://api.example.com`
+-   Staging web: `https://staging.example.com`
+-   Staging API: `https://api-staging.example.com`
 
 ## Current Runtime Rules
 
@@ -34,6 +34,6 @@
 
 ## Next Things To Verify
 
--   staging Pages custom domain activation for `pad-staging.ch5.me`
+-   staging Pages custom domain activation for `staging.example.com`
 -   full signup completion via real delivered email code
 -   real TOTP secret migration on the physical iPhone

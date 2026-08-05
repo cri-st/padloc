@@ -4,13 +4,13 @@
     "method": "OPTIONS (CORS preflight)",
     "curl_exit_code": 0,
     "request_headers": {
-        "Origin": "https://pad.ch5.me"
+        "Origin": "https://app.example.com"
     },
     "response_headers": {
         "HTTP/2": 200,
-        "access-control-allow-origin": "https://pad.ch5.me",
+        "access-control-allow-origin": "https://app.example.com",
         "access-control-allow-headers": "Content-Type",
         "access-control-allow-methods": "OPTIONS, POST"
     },
-    "notes": "CORS confirmed working. ALLOW_ORIGIN=https://pad.ch5.me is correctly set and returned in response headers. Padloc PWA at https://pad.ch5.me is allowed to make API calls."
+    "notes": "CORS confirmed working. ALLOW_ORIGIN=https://app.example.com is correctly set and returned in response headers. Padloc PWA at https://app.example.com is allowed to make API calls."
 }

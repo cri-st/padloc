@@ -147,8 +147,8 @@ envelopes for reportable Worker errors and OTLP JSON traces for
 
 | Name               | Delivery                  | Required            | Notes                                                                                                                      |
 | ------------------ | ------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `HQ_SENTRY_DSN`    | Hush-backed Worker secret | staging, production | CH5 internal Sentry-compatible DSN. Host must be `logs.ch5.me` or `staging.logs.ch5.me`; `sentry.io` is rejected.          |
-| `HQ_OTLP_ENDPOINT` | Hush-backed Worker secret | staging, production | CH5 internal OTLP HTTP endpoint. Host must be `logs.ch5.me` or `staging.logs.ch5.me`; `/v1/traces` is appended if missing. |
+| `HQ_SENTRY_DSN`    | Hush-backed Worker secret | staging, production | CH5 internal Sentry-compatible DSN. Host must be `logs.example.com` or `staging.logs.example.com`; `sentry.io` is rejected.          |
+| `HQ_OTLP_ENDPOINT` | Hush-backed Worker secret | staging, production | CH5 internal OTLP HTTP endpoint. Host must be `logs.example.com` or `staging.logs.example.com`; `/v1/traces` is appended if missing. |
 | `HQ_ENVIRONMENT`   | Derived var/secret        | staging, production | Environment tag, e.g. `staging` or `production`. Defaults to `development`.                                                |
 | `HQ_RELEASE`       | Derived var/secret        | staging, production | Release tag, e.g. `padloc-worker@<sha>`. Defaults from `VERSION`.                                                          |
 | `HQ_SERVICE_NAME`  | Derived var/secret        | staging, production | OTLP `service.name`. Defaults to `padloc-worker`.                                                                          |

@@ -410,7 +410,7 @@
 -   **`PL_SERVER_URL` is baked at build time**: `webpack.config.js` uses
     `DefinePlugin` to replace `process.env.PL_SERVER_URL` at build time. The
     extension does NOT read `PL_SERVER_URL` at runtime. In CI, the workflow
-    passes `PL_SERVER_URL=https://api-pad-staging.ch5.me` when building so the
+    passes `PL_SERVER_URL=https://api-staging.example.com` when building so the
     extension connects to staging.
 -   **Test scope vs existing unit tests**: `test/*.ts` (mocha + sinon) tests
     unit-level logic (field classification, cold-start state machines, OAuth

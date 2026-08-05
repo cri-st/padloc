@@ -38,10 +38,10 @@ export async function runHqInstrumentationTests(): Promise<HqInstrumentationRepo
         try {
             initializeHqInstrumentation({
                 sentryDsn: "https://public@o0.ingest.sentry.io/1",
-                otlpEndpoint: "https://logs.ch5.me/otlp",
+                otlpEndpoint: "https://logs.example.com/otlp",
             });
         } catch (error) {
-            threw = String(error).includes("sentry.io") || String(error).includes("logs.ch5.me");
+            threw = String(error).includes("sentry.io") || String(error).includes("logs.example.com");
         }
         assertTrue(threw, "sentry.io rejected");
     });
@@ -51,7 +51,7 @@ export async function runHqInstrumentationTests(): Promise<HqInstrumentationRepo
         let threw = false;
         try {
             initializeHqInstrumentation({
-                sentryDsn: "https://public@logs.ch5.me/1",
+                sentryDsn: "https://public@logs.example.com/1",
                 otlpEndpoint: "https://collector.example.com/v1/traces",
             });
         } catch (error) {
@@ -64,7 +64,7 @@ export async function runHqInstrumentationTests(): Promise<HqInstrumentationRepo
         resetHqInstrumentationForTests();
         let threw = false;
         try {
-            initializeHqInstrumentation({ sentryDsn: "https://public@logs.ch5.me/1" });
+            initializeHqInstrumentation({ sentryDsn: "https://public@logs.example.com/1" });
         } catch (error) {
             threw = String(error).includes("both HQ_SENTRY_DSN and HQ_OTLP_ENDPOINT");
         }
@@ -75,8 +75,8 @@ export async function runHqInstrumentationTests(): Promise<HqInstrumentationRepo
         resetHqInstrumentationForTests();
         const posts: Array<{ url: string; body: string; contentType: string }> = [];
         initializeHqInstrumentation({
-            sentryDsn: "https://public@logs.ch5.me/42",
-            otlpEndpoint: "https://logs.ch5.me/otlp",
+            sentryDsn: "https://public@logs.example.com/42",
+            otlpEndpoint: "https://logs.example.com/otlp",
             environment: "test",
             release: "padloc-worker@test",
             fetchImpl: async (url, init) => {
@@ -95,11 +95,11 @@ export async function runHqInstrumentationTests(): Promise<HqInstrumentationRepo
         await flushHqInstrumentation();
         assertEqual(posts.length, 2, "two telemetry posts");
         assertTrue(
-            posts.some((post) => post.url === "https://logs.ch5.me/api/42/envelope/"),
+            posts.some((post) => post.url === "https://logs.example.com/api/42/envelope/"),
             "envelope URL used"
         );
         assertTrue(
-            posts.some((post) => post.url === "https://logs.ch5.me/otlp/v1/traces"),
+            posts.some((post) => post.url === "https://logs.example.com/otlp/v1/traces"),
             "OTLP URL used"
         );
         assertTrue(
@@ -116,8 +116,8 @@ export async function runHqInstrumentationTests(): Promise<HqInstrumentationRepo
         resetHqInstrumentationForTests();
         const warnings: string[] = [];
         initializeHqInstrumentation({
-            sentryDsn: "https://public@logs.ch5.me/42",
-            otlpEndpoint: "https://logs.ch5.me/otlp",
+            sentryDsn: "https://public@logs.example.com/42",
+            otlpEndpoint: "https://logs.example.com/otlp",
             warn: (message) => warnings.push(message),
             fetchImpl: async () => new Response("down", { status: 503 }),
         });

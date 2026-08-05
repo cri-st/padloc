@@ -12,7 +12,7 @@ in parallel; account logins and Crown mutation are hard-gated on this plan + hum
 
 ## 1. Goal
 
-Make the self-hosted CH5 Padloc fork (`pad.ch5.me`) the company's single store for
+Make the self-hosted CH5 Padloc fork (`app.example.com`) the company's single store for
 **interactive-login credentials, passkeys, and autofill identity/address/payment**,
 unlocked and synced across:
 
@@ -196,7 +196,7 @@ needs ONE human sign-in (password + 2FA) to reach the add-passkey page = the
 
 ## 5. Sync topology
 
-Standard Padloc zero-knowledge sync — server (`api-pad.ch5.me`) sees only ciphertext;
+Standard Padloc zero-knowledge sync — server (`api.example.com`) sees only ciphertext;
 `getVault`/`updateVault` exchange `encryptedData` + RSA-wrapped `accessors` only.
 
 **Unlock chain (per device/instance):**

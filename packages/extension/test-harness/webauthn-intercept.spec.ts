@@ -24,10 +24,10 @@ test("main-world WebAuthn create is intercepted before native browser handling",
         expect(worker.url()).toContain("chrome-extension://");
 
         const page = await context.newPage();
-        await page.route("https://passkey-test.ch5.me/**", (route) =>
+        await page.route("https://passkey-test.example.com/**", (route) =>
             route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>Passkey test</title>" })
         );
-        await page.goto("https://passkey-test.ch5.me/");
+        await page.goto("https://passkey-test.example.com/");
         await page.waitForLoadState("domcontentloaded");
 
         const unsupportedAlgorithm = await page.evaluate(async () => {
@@ -35,7 +35,7 @@ test("main-world WebAuthn create is intercepted before native browser handling",
                 await navigator.credentials.create({
                     publicKey: {
                         challenge: crypto.getRandomValues(new Uint8Array(32)),
-                        rp: { id: "ch5.me", name: "CH5" },
+                        rp: { id: "example.com", name: "CH5" },
                         user: {
                             id: crypto.getRandomValues(new Uint8Array(16)),
                             name: "agent@example.com",
@@ -66,7 +66,7 @@ test("main-world WebAuthn create is intercepted before native browser handling",
                     signal: controller.signal,
                     publicKey: {
                         challenge: crypto.getRandomValues(new Uint8Array(32)),
-                        rp: { id: "ch5.me", name: "CH5" },
+                        rp: { id: "example.com", name: "CH5" },
                         user: {
                             id: crypto.getRandomValues(new Uint8Array(16)),
                             name: "agent@example.com",

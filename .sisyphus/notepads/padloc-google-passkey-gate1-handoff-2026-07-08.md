@@ -121,7 +121,7 @@ Use Zack only. Do not touch Crown.
 1. Rebuild extension with the device-bound patch:
 
 ```bash
-PL_SERVER_URL=https://api-pad-staging.ch5.me npm --prefix packages/extension run build
+PL_SERVER_URL=https://api-staging.example.com npm --prefix packages/extension run build
 npm run web-extension:preflight
 ```
 

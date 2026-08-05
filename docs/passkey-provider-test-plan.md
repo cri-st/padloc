@@ -105,7 +105,7 @@ vault.
 -   The latest clean extension unit run passes 223 tests. TypeScript passes with
     `--skipLibCheck`, which is required by the repository's existing
     webpack/tapable declaration mismatch. The production extension build targets
-    `https://api-pad.ch5.me`, emits no source maps, and compiles passkey
+    `https://api.example.com`, emits no source maps, and compiles passkey
     diagnostics off unless `PL_PASSKEY_DIAGNOSTICS=true` is explicitly supplied.
 -   Pure ES256 registration and assertion tests verify RP binding, authenticator
     flags, COSE encoding, DER signatures, counter behavior, and public-key
@@ -114,7 +114,7 @@ vault.
     encrypted items and are excluded from item-history snapshots.
 -   Real Chromium smoke coverage proves the main-world request reaches the
     isolated bridge and returns to native handling within a bounded timeout.
--   The controlled `https://passkey-test.ch5.me` E2E passes through the real
+-   The controlled `https://passkey-test.example.com` E2E passes through the real
     extension background and approval UI. The latest clean local run creates
     five discoverable vault-held credentials, authenticates one through
     `allowCredentials`, presents all five redacted identities for a usernameless
@@ -165,7 +165,7 @@ vault.
     user-presence reauthentication, and Chrome requires a person to load the
     unpacked extension from its internal extensions page. No Google account
     security setting has yet been changed by this work.
--   The live canary build targets `https://api-pad.ch5.me` with
+-   The live canary build targets `https://api.example.com` with
     `PL_BUILD_ENV=production`; the backend URL was verified in the generated
     background bundle before browser loading.
 -   Worker diagnostics no longer serialize provisioning/auth objects. Provisioning
