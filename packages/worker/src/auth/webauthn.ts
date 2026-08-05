@@ -162,16 +162,29 @@ export class WebAuthnServer implements AuthServer {
             throw new Err(ErrorCode.AUTHENTICATION_FAILED, "Authenticator not fully registered.");
         }
 
+        // Transport hints tell the browser where to find the credential.
+        // A platform (biometric) credential lives on THIS device -- hint
+        // "internal" so the browser goes straight to Touch ID/Face ID. Without
+        // it (older credentials stored transports=null), the browser offers
+        // the cross-device/hybrid flow, which runs a ~30s Bluetooth scan
+        // before the local authenticator becomes selectable.
+        const storedTransports = authenticator.state.registrationInfo.transports;
+        const transports: AuthenticatorTransportFuture[] =
+            authenticator.type === AuthType.WebAuthnPlatform
+                ? storedTransports && storedTransports.length
+                    ? storedTransports
+                    : ["internal"]
+                : storedTransports || [];
+
         const options = await generateAuthenticationOptions({
             rpID: this.config.rpID,
             allowCredentials: [
                 {
                     id: authenticator.state.registrationInfo.credentialID,
-                    transports: authenticator.state.registrationInfo.transports,
+                    transports,
                 },
             ],
-            userVerification:
-                authenticator.type === AuthType.WebAuthnPlatform ? "required" : "preferred",
+            userVerification: authenticator.type === AuthType.WebAuthnPlatform ? "required" : "preferred",
         });
 
         request.state = {
