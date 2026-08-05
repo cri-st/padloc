@@ -164,7 +164,8 @@ export class WebAuthnServer implements AuthServer {
                     transports: authenticator.state.registrationInfo.transports,
                 },
             ],
-            userVerification: "preferred",
+            userVerification:
+                authenticator.type === AuthType.WebAuthnPlatform ? "required" : "preferred",
         });
 
         request.state = {
@@ -189,6 +190,7 @@ export class WebAuthnServer implements AuthServer {
             expectedChallenge: request.state.authenticationOptions.challenge,
             expectedOrigin: this.config.origin,
             expectedRPID: this.config.rpID,
+            requireUserVerification: authenticator.type === AuthType.WebAuthnPlatform,
             credential: {
                 id: credentialID,
                 publicKey: base64ToBytes(credentialPublicKey),
