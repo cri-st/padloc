@@ -184,13 +184,25 @@ function kdbxEntryToVaultItem(entry: KdbxWeb.KdbxEntry): Promise<VaultItem> {
     // is a credit card/license" entry type, so custom fields for those are just
     // arbitrary named strings - guess a sensible Padloc field type instead of always
     // falling back to plain text.
+    //
+    // Padloc's own Credit pattern only matches 16+ digit runs, missing 15-digit Amex
+    // numbers (and anything else off the common-card-length beaten path). A bare
+    // "Number" field co-occurring with a CVV-like field is a strong, entry-level
+    // signal that it's a card number regardless of digit count - much safer than
+    // trusting the field name "Number" in isolation, which could mean anything.
+    const looksLikeCardEntry = [...entry.fields.keys()].some((key) => /cvv|cvc|security.?code|verification/i.test(key));
+
     for (const [key, value] of entry.fields) {
         if (NON_EXTRA_FIELD_KEYS.has(key)) {
             continue;
         }
         const strValue = fieldValueToString(value);
         if (strValue) {
-            fields.push(new Field({ name: key, value: strValue, type: guessKdbxFieldType(key, strValue) }));
+            const type =
+                looksLikeCardEntry && /^number$/i.test(key.trim())
+                    ? FieldType.Credit
+                    : guessKdbxFieldType(key, strValue);
+            fields.push(new Field({ name: key, value: strValue, type }));
         }
     }
 

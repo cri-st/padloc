@@ -105,6 +105,16 @@ async function run() {
     entryG.fields.set("Verification Number", "123");
     entryG.fields.set("Expire", "08/30");
 
+    // Entry H: same field-naming pattern but an Amex card (15-digit number, doesn't
+    // match Padloc's own Credit pattern which requires 16+ digits) - the "Number"
+    // field must still be detected as Credit via co-occurrence with a CVV-like field.
+    const entryH = db.createEntry(rootGroup);
+    entryH.fields.set("Title", "Test Bank Amex");
+    entryH.fields.set("Cardholder Name", "Jane Q. Public");
+    entryH.fields.set("Number", "371595007456171");
+    entryH.fields.set("Type", "amex");
+    entryH.fields.set("Verification Number", "1234");
+
     // Entry E: lives in the Recycle Bin -> must be excluded from the import
     const recycleBin = db.getGroup(db.meta.recycleBinUuid!)!;
     const entryE = db.createEntry(recycleBin);
@@ -138,7 +148,7 @@ async function run() {
     const loaded = await loadKeePassKdbx(data, password);
     const items = await parseKeePassKdbxEntries(loaded);
 
-    ok(items.length === 6, `parses exactly the 6 non-recycled entries (got ${items.length})`);
+    ok(items.length === 7, `parses exactly the 7 non-recycled entries (got ${items.length})`);
     ok(!items.some((i) => i.name === "Deleted Site"), "excludes entries inside the Recycle Bin");
 
     const github = items.find((i) => i.name === "GitHub");
@@ -207,6 +217,18 @@ async function run() {
         );
         ok(typeByName("Cardholder Name") === FieldType.Text, "plain name field stays Text");
         ok(fieldByName(card, "Number") === "4111111111111111", "card number value preserved");
+    }
+
+    const amex = items.find((i) => i.name === "Test Bank Amex");
+    ok(!!amex, "finds the Test Bank Amex entry");
+    if (amex) {
+        const typeByName = (name: string) => amex.fields.find((f) => f.name === name)?.type;
+        ok(
+            typeByName("Number") === FieldType.Credit,
+            "15-digit Amex card number detected as Credit via CVV co-occurrence"
+        );
+        ok(typeByName("Verification Number") === FieldType.Pin, "Amex CVV field detected as Pin");
+        ok(fieldByName(amex, "Number") === "371595007456171", "Amex card number value preserved");
     }
 
     console.log(`\n${passed} passed, ${failed} failed`);
