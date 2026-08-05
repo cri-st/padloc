@@ -8,7 +8,14 @@
             content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
         />
         <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <!-- iOS 26 ("Liquid Glass") has a widely-reported bug where
+             black-translucent miscalculates safe-area insets in standalone
+             PWAs, leaving a black gap at the bottom (home indicator area).
+             "black" trades perfect per-theme top-bar color-matching for a
+             stable, correctly-laid-out viewport -- worth it since a wrong
+             layout (clipped/hidden content) is worse than a slightly-off
+             status bar color. -->
+        <meta name="apple-mobile-web-app-status-bar-style" content="black" />
         <!-- Status bar / theme color. Per web.dev guidance
              (https://web.dev/articles/add-manifest#theme_color_in_media_queries),
              prefers-color-scheme metas give the correct pre-JS color matching
