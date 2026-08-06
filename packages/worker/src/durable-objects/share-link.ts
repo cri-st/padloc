@@ -78,6 +78,7 @@ export interface CreateShareInput {
 export interface SharePeekResult {
     expired: boolean;
     viewed: boolean;
+    revoked: boolean;
 }
 
 export interface ShareRevealResult {
@@ -136,7 +137,7 @@ export class ShareLinkDO extends DurableObject<Env> {
         if (!row) {
             return null;
         }
-        return { expired: Date.now() >= row.expires_at, viewed: !!row.viewed };
+        return { expired: Date.now() >= row.expires_at, viewed: !!row.viewed, revoked: !!row.revoked };
     }
 
     /**

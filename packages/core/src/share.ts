@@ -104,7 +104,7 @@ export interface ShareStorage {
     create(id: ShareID, owner: AccountID, data: CreateShareParams): Promise<void>;
 
     /** Non-destructive lookup used for anonymous page loads. MUST NOT burn the view. */
-    peek(id: ShareID): Promise<{ expired: boolean; viewed: boolean } | null>;
+    peek(id: ShareID): Promise<{ expired: boolean; viewed: boolean; revoked: boolean } | null>;
 
     /** Atomically flips the share to "viewed" and returns its ciphertext exactly once. */
     reveal(id: ShareID): Promise<ShareData | null>;

@@ -229,6 +229,14 @@ async function runFastTests(): Promise<TestResult[]> {
         if (!ownerStatus.revoked) throw new Error("Owner getShareStatus after revoke: expected revoked=true");
         if (ownerStatus.viewed) throw new Error("Owner getShareStatus after revoke: expected viewed=false");
 
+        // Anonymous pre-reveal peek (what the share-view landing page polls
+        // on load) MUST also report revoked=true -- ShareLinkDO.peek() used
+        // to omit this field entirely, so a recipient reloading a revoked
+        // link's page would see the normal "Reveal" button as if the link
+        // were still valid (see the peek()/revoked security review finding).
+        const anonPeekStatus: ShareStatus = await anonClient.peekShare(info.id);
+        if (!anonPeekStatus.revoked) throw new Error("Anonymous peekShare after revoke: expected revoked=true");
+
         let revealFailed = false;
         try {
             await anonClient.revealShare(info.id);

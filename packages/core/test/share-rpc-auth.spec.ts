@@ -43,12 +43,12 @@ class FakeShareStorage implements ShareStorage {
         });
     }
 
-    async peek(id: string): Promise<{ expired: boolean; viewed: boolean } | null> {
+    async peek(id: string): Promise<{ expired: boolean; viewed: boolean; revoked: boolean } | null> {
         const share = this.shares.get(id);
         if (!share) {
             return null;
         }
-        return { expired: share.expired, viewed: share.viewed };
+        return { expired: share.expired, viewed: share.viewed, revoked: share.revoked };
     }
 
     async reveal(id: string): Promise<ShareData | null> {

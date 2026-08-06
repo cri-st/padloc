@@ -28,7 +28,7 @@ export class DurableObjectShareStorage implements ShareStorage {
         await this._stub(id).create(input);
     }
 
-    async peek(id: ShareID): Promise<{ expired: boolean; viewed: boolean } | null> {
+    async peek(id: ShareID): Promise<{ expired: boolean; viewed: boolean; revoked: boolean } | null> {
         return this._stub(id).peek();
     }
 

@@ -15,7 +15,7 @@ import "./spinner";
 import { css, html, LitElement } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 
-type ShareViewStatus = "loading" | "invalid" | "viewed" | "ready" | "revealed";
+type ShareViewStatus = "loading" | "invalid" | "viewed" | "revoked" | "ready" | "revealed";
 
 /**
  * Anonymous, pre-auth landing page for a one-time share link
@@ -59,7 +59,7 @@ export class ShareView extends Routing(StateMixin(LitElement)) {
 
         try {
             const status = await app.api.peekShare(this._shareId);
-            this._status = status.expired ? "invalid" : status.viewed ? "viewed" : "ready";
+            this._status = status.expired ? "invalid" : status.revoked ? "revoked" : status.viewed ? "viewed" : "ready";
         } catch (e) {
             this._status = "invalid";
         }
@@ -135,6 +135,7 @@ export class ShareView extends Routing(StateMixin(LitElement)) {
                     ${this._status === "loading" ? this._renderLoading() : ""}
                     ${this._status === "invalid" ? this._renderInvalid() : ""}
                     ${this._status === "viewed" ? this._renderViewed() : ""}
+                    ${this._status === "revoked" ? this._renderRevoked() : ""}
                     ${this._status === "ready" ? this._renderReady() : ""}
                     ${this._status === "revealed" ? this._renderRevealed() : ""}
                 </div>
@@ -168,6 +169,16 @@ export class ShareView extends Routing(StateMixin(LitElement)) {
                 <pl-icon icon="check" class="huge"></pl-icon>
                 <h1 class="big">${$l("Already Viewed")}</h1>
                 <div class="subtle">${$l("This link has already been used and can't be viewed again.")}</div>
+            </div>
+        `;
+    }
+
+    private _renderRevoked() {
+        return html`
+            <div class="centering vertical spacing layout text-centering">
+                <pl-icon icon="warning" class="huge"></pl-icon>
+                <h1 class="big">${$l("Link Revoked")}</h1>
+                <div class="subtle">${$l("The sender has revoked this link. Ask them to share it again if needed.")}</div>
             </div>
         `;
     }
