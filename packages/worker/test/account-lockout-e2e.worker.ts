@@ -33,11 +33,13 @@ import { marshal, unmarshal } from "@padloc/core/src/encoding";
 import { AccountLockDO } from "../src/locks/account-lock";
 import { ShareLinkDO } from "../src/durable-objects/share-link";
 import { Env } from "../src/env";
+import { RateLimitDO } from "../src/durable-objects/rate-limit";
 
-// ShareLinkDO must be exported once ANY DO class is exported here -- wrangler
-// hard-fails startup for every configured DO binding whose class isn't also
-// exported the moment a worker script exports at least one DO class.
-export { AccountLockDO, ShareLinkDO };
+// ShareLinkDO/RateLimitDO must be exported once ANY DO class is exported
+// here -- wrangler hard-fails startup for every configured DO binding
+// whose class isn't also exported the moment a worker script exports at
+// least one DO class.
+export { AccountLockDO, ShareLinkDO, RateLimitDO };
 
 let testEnv: Env;
 

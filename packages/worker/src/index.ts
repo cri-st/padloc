@@ -1,14 +1,16 @@
 import { Request as PlRequest, Response as PlResponse } from "@padloc/core/src/transport";
 import { ErrorCode } from "@padloc/core/src/error";
+import { ANONYMOUS_SHARE_METHODS } from "@padloc/core/src/share";
 import { WorkerReceiver, WorkerReceiverConfig } from "./transport";
 import { IdempotencyStore } from "./idempotency";
 import { Env } from "./env";
 import { createServer } from "./server-factory";
 import { AccountLockDO } from "./locks/account-lock";
 import { ShareLinkDO } from "./durable-objects/share-link";
+import { RateLimitDO } from "./durable-objects/rate-limit";
 import { Server } from "@padloc/core/src/server";
 import { responseHeaders } from "./observability/security-headers";
-import { RateLimiter } from "./rate-limiter";
+import { DurableObjectRateLimiter, RateLimiter, RateLimiterLike } from "./rate-limiter";
 import { captureHqException, initializeHqInstrumentationFromEnv, withHqSpan } from "./hq-instrumentation";
 
 let cachedServer: Server | undefined;
@@ -59,10 +61,16 @@ async function healthcheck(env: Env): Promise<HealthcheckStatus> {
     return health;
 }
 
-export { AccountLockDO, ShareLinkDO };
+export { AccountLockDO, ShareLinkDO, RateLimitDO };
 
-/** RPC methods gated by the share-view rate limiter (anonymous, brute-forceable). */
-const SHARE_VIEW_METHODS = new Set(["peekShare", "revealShare"]);
+/**
+ * RPC methods gated by the share-view rate limiter (anonymous,
+ * brute-forceable). Same set `@padloc/core`'s `ANONYMOUS_SHARE_METHODS`
+ * uses to keep the client/server identity-free -- re-exported under the
+ * historical local name here rather than duplicated, so the two lists
+ * can never drift apart.
+ */
+const SHARE_VIEW_METHODS = ANONYMOUS_SHARE_METHODS;
 
 /**
  * Derives the rate-limit identities for an anonymous share-view request --
@@ -88,7 +96,7 @@ export async function checkShareViewRateLimit(
     method: string,
     params: unknown[] | undefined,
     ip: string,
-    limiter: RateLimiter
+    limiter: RateLimiterLike
 ): Promise<boolean> {
     const keys = shareViewRateLimitKeys(method, params, ip);
     if (!keys) {
@@ -120,10 +128,17 @@ export default {
             maxRequests: Number(env.RATE_LIMIT_MAX_REQUESTS || 100),
             windowMs: Number(env.RATE_LIMIT_WINDOW_MS || 60000),
         });
-        // Conservative fixed default (design.md open question: "10/min/IP, tune
-        // post-launch") -- no dedicated Env surface yet, unlike the generic
-        // limiter above, to keep this batch's worker/env.ts untouched.
-        const shareViewRateLimiter = new RateLimiter(env.HINTS, { maxRequests: 10, windowMs: 60_000 });
+        // Structurally atomic (Durable-Object-backed) -- a security audit
+        // found the KV-backed RateLimiter's get()-then-put() has no
+        // compare-and-swap, letting concurrent requests double-spend a
+        // token and erode this throttle. `SHARE_VIEW_RATE_LIMIT` binding
+        // is optional (falls back to always-allow, same as every other
+        // optional binding in this file) so deployments that haven't
+        // added the migration yet degrade safely rather than 500ing.
+        const shareViewRateLimiter = new DurableObjectRateLimiter(env.SHARE_VIEW_RATE_LIMIT, {
+            maxRequests: 10,
+            windowMs: 60_000,
+        });
         const receiver = new WorkerReceiver(config);
 
         const url = new URL(request.url);

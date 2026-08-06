@@ -38,7 +38,14 @@ Module.prototype.require = function (id) {
     // `fetch` handler; none of it is needed to exercise the two pure,
     // exported rate-limit helpers under test, so every relative/@padloc
     // import (and `cloudflare:workers`, transitively reachable via
-    // `./durable-objects/share-link`) is stubbed to an empty module.
+    // `./durable-objects/share-link`) is stubbed to an empty module --
+    // EXCEPT `@padloc/core/src/share`, which provides the real
+    // `ANONYMOUS_SHARE_METHODS` set `index.ts` re-exports as
+    // `SHARE_VIEW_METHODS`; stubbing it to `{}` would silently break
+    // `shareViewRateLimitKeys()`'s method-gating check.
+    if (id === "@padloc/core/src/share") {
+        return { ANONYMOUS_SHARE_METHODS: new Set(["peekShare", "revealShare"]) };
+    }
     if (id === "cloudflare:workers" || id.startsWith(".") || id.startsWith("@padloc/")) {
         return {};
     }

@@ -141,7 +141,7 @@ Sender MUST see whether/when viewed; receipt MUST show only a timestamp, never i
 
 ### Requirement: Rate Limiting
 
-View endpoint MUST enforce per-share-ID and per-IP attempt limits.
+View endpoint MUST enforce per-share-ID and per-IP attempt limits. The limiter's check-and-consume operation MUST be atomic per identity -- two concurrent requests for the same identity MUST NEVER both be admitted against a single remaining token.
 
 #### Scenario: Per-share brute-force attempts
 - GIVEN attempts on one share id exceed the cap
@@ -152,6 +152,11 @@ View endpoint MUST enforce per-share-ID and per-IP attempt limits.
 - GIVEN one IP exceeds its limit across many share ids
 - WHEN next request arrives
 - THEN server MUST reject with a rate-limit error
+
+#### Scenario: Concurrent requests never double-spend the last token
+- GIVEN an identity has exactly one token remaining
+- WHEN two requests for that identity arrive concurrently
+- THEN exactly one MUST be allowed and the other rejected -- never both
 
 ### Requirement: Item-Type Scope
 

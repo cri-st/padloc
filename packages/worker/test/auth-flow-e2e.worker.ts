@@ -43,8 +43,10 @@ import { marshal, unmarshal, bytesToBase32, base32ToBytes } from "@padloc/core/s
 import { AccountLockDO } from "../src/locks/account-lock";
 import { AuthType, AuthPurpose } from "@padloc/core/src/auth";
 import { totp } from "@padloc/core/src/otp";
+import { RateLimitDO } from "../src/durable-objects/rate-limit";
+import { ShareLinkDO } from "../src/durable-objects/share-link";
 
-export { AccountLockDO };
+export { AccountLockDO, ShareLinkDO, RateLimitDO };
 
 let testEnv: any;
 

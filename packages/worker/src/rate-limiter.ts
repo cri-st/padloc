@@ -1,5 +1,18 @@
 /**
- * Token-bucket rate limiter backed by KVNamespace.
+ * Token-bucket rate limiting. Two implementations share the same
+ * `RateLimiterLike` interface:
+ *
+ * - `RateLimiter` (KV-backed): get()-then-put(), no compare-and-swap.
+ *   Best-effort only -- two concurrent requests for the same identity can
+ *   both read the same token count before either write lands, letting
+ *   both through for the price of one token. Fine for coarse, generic
+ *   abuse protection (the default transport-level limiter).
+ * - `DurableObjectRateLimiter` (DO-backed, see
+ *   `durable-objects/rate-limit.ts`): structurally atomic, the same
+ *   guarantee `ShareLinkDO` relies on for single-view atomicity. Used for
+ *   the anonymous share-view throttle specifically, where a security
+ *   audit found the KV race meaningfully erodes the (secondary, behind
+ *   share-ID entropy) brute-force defense.
  *
  * Per-identity (IP or account ID) with configurable:
  * - maxRequests: tokens per window
@@ -7,10 +20,23 @@
  *
  * Returns { allowed: boolean, remaining: number, retryAfterMs?: number }.
  *
- * When KV is unavailable (no binding), rate limiting is a no-op and always
- * allows — this prevents the limiter from becoming a single point of failure.
+ * When the underlying binding is unavailable, both implementations no-op
+ * and always allow -- this prevents the limiter from becoming a single
+ * point of failure.
  */
-export class RateLimiter {
+import { RateLimitStub } from "./durable-objects/rate-limit";
+
+export interface RateLimitResult {
+    allowed: boolean;
+    remaining: number;
+    retryAfterMs?: number;
+}
+
+export interface RateLimiterLike {
+    check(identity: string): Promise<RateLimitResult>;
+}
+
+export class RateLimiter implements RateLimiterLike {
     private kv?: KVNamespace;
     private maxRequests: number;
     private windowMs: number;
@@ -21,7 +47,7 @@ export class RateLimiter {
         this.windowMs = opts?.windowMs ?? 60_000;
     }
 
-    async check(identity: string): Promise<{ allowed: boolean; remaining: number; retryAfterMs?: number }> {
+    async check(identity: string): Promise<RateLimitResult> {
         if (!this.kv) {
             return { allowed: true, remaining: this.maxRequests };
         }
@@ -47,5 +73,25 @@ export class RateLimiter {
             expirationTtl: Math.ceil(this.windowMs / 1000) + 60,
         });
         return { allowed: true, remaining: raw.tokens };
+    }
+}
+
+/** Structurally atomic rate limiter backed by `RateLimitDO`. */
+export class DurableObjectRateLimiter implements RateLimiterLike {
+    constructor(
+        private namespace: DurableObjectNamespace | undefined,
+        private opts?: { maxRequests?: number; windowMs?: number }
+    ) {}
+
+    async check(identity: string): Promise<RateLimitResult> {
+        const maxRequests = this.opts?.maxRequests ?? 100;
+        const windowMs = this.opts?.windowMs ?? 60_000;
+
+        if (!this.namespace) {
+            return { allowed: true, remaining: maxRequests };
+        }
+
+        const stub = this.namespace.get(this.namespace.idFromName(identity)) as unknown as RateLimitStub;
+        return stub.consume(maxRequests, windowMs);
     }
 }
