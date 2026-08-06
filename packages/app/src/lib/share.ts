@@ -1,5 +1,5 @@
 import { base64ToBytes, bytesToBase64 } from "@padloc/core/src/encoding";
-import { FieldType, VaultItem } from "@padloc/core/src/item";
+import { Field, FieldType, VaultItem } from "@padloc/core/src/item";
 
 /**
  * Shared parsing/serialization for a share link's URL fragment
@@ -49,4 +49,49 @@ export function decodeShareKeyFragment(hash: string): Uint8Array | null {
  */
 export function isShareableItem(item: Pick<VaultItem, "fields">): boolean {
     return item.fields.some((field) => field.type === FieldType.Password);
+}
+
+/**
+ * Field types that are NEVER offered as shareable, regardless of user
+ * choice. A live TOTP secret grants ONGOING 2FA bypass for as long as
+ * the recipient keeps it -- unlike a password, it isn't a one-time
+ * secret, so it's excluded from the share dialog's field list entirely
+ * (not shown, not selectable), rather than merely unchecked by default.
+ */
+const NEVER_SHAREABLE_FIELD_TYPES: FieldType[] = [FieldType.Totp];
+
+/**
+ * Field types pre-selected by default when opening the share dialog --
+ * the deliberately narrow "simplest" set (username, password, url,
+ * email). Any other selectable field type (Note, Pin, Text, ...) is
+ * available in the dialog but starts unchecked, so the sender must
+ * explicitly opt in to sharing anything beyond the basics.
+ */
+const DEFAULT_SHAREABLE_FIELD_TYPES: FieldType[] = [
+    FieldType.Username,
+    FieldType.Password,
+    FieldType.Url,
+    FieldType.Email,
+];
+
+/** Whether a field may ever be offered in the share dialog's field selector. */
+export function isFieldShareable(field: Pick<Field, "type">): boolean {
+    return !NEVER_SHAREABLE_FIELD_TYPES.includes(field.type);
+}
+
+/** Whether a field is pre-selected by default when opening the share dialog. */
+export function isFieldSelectedByDefault(field: Pick<Field, "type">): boolean {
+    return DEFAULT_SHAREABLE_FIELD_TYPES.includes(field.type);
+}
+
+/**
+ * Builds the minimal item that actually gets encrypted and shared -- a
+ * FRESH `VaultItem` containing only `name` and the caller-selected
+ * fields. Deliberately never a copy or mutation of the source item, so
+ * structural properties that must never be shareable (`passkeys`,
+ * `history`, `attachments`, `tags`, `id`) are structurally impossible to
+ * include, not merely filtered out.
+ */
+export function buildShareableItem(name: string, selectedFields: Field[]): VaultItem {
+    return new VaultItem({ name, fields: selectedFields });
 }

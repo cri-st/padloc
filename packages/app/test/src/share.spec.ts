@@ -7,12 +7,26 @@
  *    copy/paste" or "recipient can never decrypt".
  *  - The "Login item" heuristic gating which items are shareable in v1:
  *    only items carrying at least one `FieldType.Password` field.
+ *  - Field-level share filtering: TOTP fields must NEVER be offered as
+ *    shareable (a live TOTP secret grants ongoing 2FA bypass, unlike a
+ *    one-time password); other field types are opt-in, with a narrow
+ *    "simplest" default (Username/Password/Url/Email) pre-selected.
+ *  - `buildShareableItem()` always produces a FRESH VaultItem containing
+ *    only name + selected fields -- passkeys/history/attachments/tags
+ *    are structurally impossible to include, not just filtered out.
  *
  * Run: npx ts-node --transpile-only --compiler-options '{"module":"commonjs"}' \
  *          packages/app/test/src/share.spec.ts
  */
 import { Field, FieldType, VaultItem } from "@padloc/core/src/item";
-import { decodeShareKeyFragment, encodeShareKeyFragment, isShareableItem } from "../../src/lib/share";
+import {
+    buildShareableItem,
+    decodeShareKeyFragment,
+    encodeShareKeyFragment,
+    isFieldSelectedByDefault,
+    isFieldShareable,
+    isShareableItem,
+} from "../../src/lib/share";
 
 let passed = 0;
 let failed = 0;
@@ -103,6 +117,57 @@ console.log("\n[Login-item heuristic]");
     ok(isShareableItem(noteItem()) === false, "Note-only item (no Password field) is not shareable");
     ok(isShareableItem(creditCardItem()) === false, "Credit Card item (no Password field) is not shareable");
     ok(isShareableItem(new VaultItem({ name: "Empty", fields: [] })) === false, "item with no fields is not shareable");
+}
+
+// ── Field-level share filtering ─────────────────────────────────────────────
+console.log("\n[Field-level share filtering]");
+{
+    const totpField = new Field({ name: "One-Time Password", type: FieldType.Totp, value: "JBSWY3DPEHPK3PXP" });
+    const noteField = new Field({ name: "Backup Codes", type: FieldType.Note, value: "1234-5678" });
+    const usernameField = new Field({ name: "Username", type: FieldType.Username, value: "alice" });
+    const passwordField = new Field({ name: "Password", type: FieldType.Password, value: "hunter2" });
+    const urlField = new Field({ name: "URL", type: FieldType.Url, value: "https://example.com" });
+    const emailField = new Field({ name: "Email", type: FieldType.Email, value: "alice@example.com" });
+    const pinField = new Field({ name: "PIN", type: FieldType.Pin, value: "1234" });
+
+    ok(isFieldShareable(totpField) === false, "TOTP field is NEVER shareable (not offered as an option)");
+    ok(isFieldShareable(noteField) === true, "Note field is shareable opt-in (e.g. backup codes, sender's choice)");
+    ok(isFieldShareable(usernameField) === true, "Username field is shareable");
+    ok(isFieldShareable(pinField) === true, "PIN field is shareable opt-in");
+
+    ok(isFieldSelectedByDefault(usernameField) === true, "Username is selected by default");
+    ok(isFieldSelectedByDefault(passwordField) === true, "Password is selected by default");
+    ok(isFieldSelectedByDefault(urlField) === true, "Url is selected by default");
+    ok(isFieldSelectedByDefault(emailField) === true, "Email is selected by default");
+    ok(isFieldSelectedByDefault(noteField) === false, "Note is NOT selected by default (opt-in only)");
+    ok(isFieldSelectedByDefault(pinField) === false, "PIN is NOT selected by default (opt-in only)");
+    ok(isFieldSelectedByDefault(totpField) === false, "TOTP is never selected (moot -- never offered at all)");
+}
+
+// ── Minimal shared item construction ────────────────────────────────────────
+console.log("\n[Minimal shared item construction]");
+{
+    const source = new VaultItem({
+        name: "Example Login",
+        fields: [
+            new Field({ name: "Username", type: FieldType.Username, value: "alice" }),
+            new Field({ name: "Password", type: FieldType.Password, value: "hunter2" }),
+            new Field({ name: "One-Time Password", type: FieldType.Totp, value: "JBSWY3DPEHPK3PXP" }),
+        ],
+    });
+    const selected = source.fields.filter((f) => f.type !== FieldType.Totp);
+    const shared = buildShareableItem(source.name, selected);
+
+    ok(shared.name === "Example Login", "shared item keeps the source name");
+    ok(shared.fields.length === 2, "shared item has exactly the caller-selected fields, TOTP excluded");
+    ok(
+        shared.fields.every((f) => f.type !== FieldType.Totp),
+        "shared item's fields never include a TOTP field"
+    );
+    ok(shared.passkeys.length === 0, "shared item NEVER carries passkeys (fresh VaultItem, never copied)");
+    ok(shared.history.length === 0, "shared item NEVER carries edit history");
+    ok(shared.attachments.length === 0, "shared item NEVER carries attachments");
+    ok(shared.tags.length === 0, "shared item NEVER carries tags");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

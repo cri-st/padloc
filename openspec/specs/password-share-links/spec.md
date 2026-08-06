@@ -25,6 +25,30 @@ Authenticated sender MUST create shares for Login items only. Client MUST AES-25
 - WHEN `createShare` is called
 - THEN server MUST reject with an authentication error
 
+### Requirement: Field Selection Scope
+
+The share dialog MUST let the sender choose which of the item's fields are included in the share, rather than always sharing the whole item. A `Totp` field MUST NEVER be offered as selectable -- it is excluded from the field list entirely, not merely unchecked. Fields of type Username, Password, Url, and Email MUST be selected by default; all other selectable field types (e.g. Note, Pin, Text) MUST start unchecked. The shared payload MUST NEVER include the item's `passkeys`, `history`, `attachments`, or `tags`, regardless of field selection.
+
+#### Scenario: TOTP field is never offered
+- GIVEN a Login item has a Totp field
+- WHEN the sender opens the share dialog
+- THEN the Totp field MUST NOT appear in the field selector
+
+#### Scenario: Safe fields are pre-selected, others are opt-in
+- GIVEN a Login item has Username, Password, Url, and Note fields
+- WHEN the sender opens the share dialog
+- THEN Username, Password, and Url MUST be pre-checked; Note MUST be unchecked
+
+#### Scenario: Sender narrows or widens the shared fields
+- GIVEN the default selection is shown
+- WHEN the sender unchecks Url and checks Note
+- THEN the created share MUST contain exactly Username, Password, and Note -- nothing else
+
+#### Scenario: Structural item data is never shareable
+- GIVEN any Login item, regardless of field selection
+- WHEN a share is created
+- THEN the encrypted payload MUST NOT contain the item's passkeys, edit history, attachments, or tags
+
 ### Requirement: Anonymous Reveal Access
 
 Recipient endpoint MUST work without login. Page load (GET, incl. bots) MUST NOT consume the view; only an explicit "Reveal" click MUST. Concurrent reveals MUST resolve to one success.

@@ -8,12 +8,19 @@ import { until } from "lit/directives/until.js";
 import { alert } from "../lib/dialog";
 import { formatDateFromNow } from "../lib/util";
 import { setClipboard } from "../lib/clipboard";
-import { encodeShareKeyFragment, isShareableItem } from "../lib/share";
+import {
+    buildShareableItem,
+    encodeShareKeyFragment,
+    isFieldSelectedByDefault,
+    isFieldShareable,
+    isShareableItem,
+} from "../lib/share";
 import { app } from "../globals";
 import { Select } from "./select";
 import { Button } from "./button";
 import { Dialog } from "./dialog";
 import "./input";
+import "./toggle";
 import { html } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 
@@ -40,6 +47,9 @@ export class ShareDialog extends Dialog<VaultItem, void> {
     private _item: VaultItem | null = null;
 
     @state()
+    private _selectedFieldIndices: Set<number> = new Set();
+
+    @state()
     private _link: string = "";
 
     @state()
@@ -55,9 +65,27 @@ export class ShareDialog extends Dialog<VaultItem, void> {
         this._item = item;
         this._link = "";
         this._expiresAt = null;
+        this._selectedFieldIndices = new Set(
+            item.fields.reduce<number[]>((indices, field, index) => {
+                if (isFieldShareable(field) && isFieldSelectedByDefault(field)) {
+                    indices.push(index);
+                }
+                return indices;
+            }, [])
+        );
         await this.updateComplete;
         this._ttlSelect.value = ONE_DAY;
         return super.show(item);
+    }
+
+    private _toggleField(index: number, active: boolean) {
+        const next = new Set(this._selectedFieldIndices);
+        if (active) {
+            next.add(index);
+        } else {
+            next.delete(index);
+        }
+        this._selectedFieldIndices = next;
     }
 
     renderContent() {
@@ -104,6 +132,28 @@ export class ShareDialog extends Dialog<VaultItem, void> {
                           </div>
                       `
                     : html`
+                          <div class="small subtle horizontally-padded">${$l("Include:")}</div>
+
+                          <div class="vertical layout border-top border-bottom">
+                              ${item.fields.map((field, index) =>
+                                  isFieldShareable(field)
+                                      ? html`
+                                            <div
+                                                class="padded spacing horizontal center-aligning layout border-bottom:not(:last-child)"
+                                            >
+                                                <pl-icon icon=${field.icon}></pl-icon>
+                                                <div class="stretch ellipsis">${field.name || field.def.name}</div>
+                                                <pl-toggle
+                                                    .active=${this._selectedFieldIndices.has(index)}
+                                                    @change=${(e: CustomEvent<{ value: boolean }>) =>
+                                                        this._toggleField(index, e.detail.value)}
+                                                ></pl-toggle>
+                                            </div>
+                                        `
+                                      : html``
+                              )}
+                          </div>
+
                           <pl-select id="ttlSelect" .options=${TTL_OPTIONS} .label=${$l("Expires After")}></pl-select>
 
                           <div class="horizontal evenly stretching spacing layout">
@@ -128,6 +178,12 @@ export class ShareDialog extends Dialog<VaultItem, void> {
             return;
         }
 
+        const selectedFields = item.fields.filter((_, index) => this._selectedFieldIndices.has(index));
+        if (!selectedFields.length) {
+            alert($l("Select at least one field to share."), { type: "warning" });
+            return;
+        }
+
         this._createButton.start();
 
         try {
@@ -135,7 +191,7 @@ export class ShareDialog extends Dialog<VaultItem, void> {
 
             const container = new SimpleContainer();
             await container.unlock(key);
-            await container.setData(item.toBytes());
+            await container.setData(buildShareableItem(item.name, selectedFields).toBytes());
 
             const info = await app.api.createShare(
                 new CreateShareParams({
