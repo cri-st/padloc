@@ -165,10 +165,12 @@ export class WorkerReceiver implements Receiver {
         const bodyHash = await hashRequestBody(bodyText);
         const existing = await this.config.idempotencyStore?.lookup(bodyHash);
         if (existing) {
-            return new Response(JSON.stringify({ error: existing }), {
-                status: (existing.status as number) ?? 200,
+            const replayBody = marshal(existing);
+            return new Response(replayBody, {
+                status: 200,
                 headers: {
                     "Content-Type": "application/json; charset=utf-8",
+                    "Content-Length": String(new TextEncoder().encode(replayBody).byteLength),
                     "Idempotency-Replayed": "true",
                     ...responseHeaders({ allowOrigin: allowOrigin || "*" }),
                 },
@@ -201,11 +203,7 @@ export class WorkerReceiver implements Receiver {
         const clientVersion = req.device?.appVersion;
         const raw = res.toRaw(clientVersion);
 
-        await this.config.idempotencyStore?.store(bodyHash, {
-            code: raw.error,
-            message: raw.message || "",
-            status: 200,
-        });
+        await this.config.idempotencyStore?.store(bodyHash, raw);
 
         const resBody = marshal(raw);
 
