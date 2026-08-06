@@ -46,3 +46,4 @@ packages/macos/.build
 packages/macos/.signed-build
 dist-artifacts/
 scripts/*.local.sh
+.atl/
