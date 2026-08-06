@@ -72,6 +72,10 @@ class_name = "ShareLinkDO"
 name = "SHARE_VIEW_RATE_LIMIT"
 class_name = "RateLimitDO"
 
+[[env.dev.durable_objects.bindings]]
+name = "GENERAL_RATE_LIMIT"
+class_name = "RateLimitDO"
+
 [env.preview]
 name = "padloc-worker-preview"
 
@@ -110,4 +114,8 @@ class_name = "ShareLinkDO"
 
 [[env.preview.durable_objects.bindings]]
 name = "SHARE_VIEW_RATE_LIMIT"
+class_name = "RateLimitDO"
+
+[[env.preview.durable_objects.bindings]]
+name = "GENERAL_RATE_LIMIT"
 class_name = "RateLimitDO"

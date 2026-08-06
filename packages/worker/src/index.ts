@@ -10,7 +10,7 @@ import { ShareLinkDO } from "./durable-objects/share-link";
 import { RateLimitDO } from "./durable-objects/rate-limit";
 import { Server } from "@padloc/core/src/server";
 import { responseHeaders } from "./observability/security-headers";
-import { DurableObjectRateLimiter, RateLimiter, RateLimiterLike } from "./rate-limiter";
+import { DurableObjectRateLimiter, RateLimiterLike } from "./rate-limiter";
 import { captureHqException, initializeHqInstrumentationFromEnv, withHqSpan } from "./hq-instrumentation";
 
 let cachedServer: Server | undefined;
@@ -118,13 +118,29 @@ export default {
             );
             return new Response(JSON.stringify({ error: "server_misconfigured" }), {
                 status: 503,
-                headers: { "Content-Type": "application/json; charset=utf-8" },
+                headers: responseHeaders(
+                    { allowOrigin: "*" },
+                    undefined,
+                    { "Content-Type": "application/json; charset=utf-8" }
+                ),
             });
         }
         const config = new WorkerReceiverConfig();
         config.allowOrigin = allowOrigin;
         config.idempotencyStore = new IdempotencyStore(env.HINTS);
-        config.rateLimiter = new RateLimiter(env.HINTS, {
+        // Structurally atomic (Durable-Object-backed) -- this is the exact
+        // race the share-view limiter below was already hardened against
+        // (KV get()-then-put() has no compare-and-swap, letting concurrent
+        // requests for the same identity double-spend a token). This
+        // general-purpose limiter gates EVERY POST request before RPC
+        // dispatch (see WorkerReceiver._handlePost), including
+        // completeCreateSession/startCreateSession/signup/password-reset,
+        // so leaving it on the racy KV implementation left the login/
+        // account-creation surface without the same fix. `GENERAL_RATE_LIMIT`
+        // binding is optional (falls back to always-allow, same as every
+        // other optional binding in this file) so deployments that haven't
+        // added the migration yet degrade safely rather than 500ing.
+        config.rateLimiter = new DurableObjectRateLimiter(env.GENERAL_RATE_LIMIT, {
             maxRequests: Number(env.RATE_LIMIT_MAX_REQUESTS || 100),
             windowMs: Number(env.RATE_LIMIT_WINDOW_MS || 60000),
         });

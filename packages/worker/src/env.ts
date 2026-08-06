@@ -5,6 +5,7 @@ export interface Env {
     ACCOUNT_LOCK?: DurableObjectNamespace;
     SHARE_LINKS?: DurableObjectNamespace;
     SHARE_VIEW_RATE_LIMIT?: DurableObjectNamespace;
+    GENERAL_RATE_LIMIT?: DurableObjectNamespace;
     ALLOW_ORIGIN?: string;
     CLIENT_URL?: string;
     APP_NAME?: string;

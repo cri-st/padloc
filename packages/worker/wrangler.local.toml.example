@@ -73,6 +73,10 @@ class_name = "ShareLinkDO"
 name = "SHARE_VIEW_RATE_LIMIT"
 class_name = "RateLimitDO"
 
+[[env.staging.durable_objects.bindings]]
+name = "GENERAL_RATE_LIMIT"
+class_name = "RateLimitDO"
+
 [env.production]
 name = "padloc-worker"
 # No custom route yet -- test on the default *.workers.dev subdomain first,
@@ -113,4 +117,8 @@ class_name = "ShareLinkDO"
 
 [[env.production.durable_objects.bindings]]
 name = "SHARE_VIEW_RATE_LIMIT"
+class_name = "RateLimitDO"
+
+[[env.production.durable_objects.bindings]]
+name = "GENERAL_RATE_LIMIT"
 class_name = "RateLimitDO"

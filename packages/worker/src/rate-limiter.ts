@@ -5,14 +5,19 @@
  * - `RateLimiter` (KV-backed): get()-then-put(), no compare-and-swap.
  *   Best-effort only -- two concurrent requests for the same identity can
  *   both read the same token count before either write lands, letting
- *   both through for the price of one token. Fine for coarse, generic
- *   abuse protection (the default transport-level limiter).
+ *   both through for the price of one token. Kept as the storage-layer
+ *   implementation for tests/reference; no longer wired into a real
+ *   request path (see below).
  * - `DurableObjectRateLimiter` (DO-backed, see
  *   `durable-objects/rate-limit.ts`): structurally atomic, the same
  *   guarantee `ShareLinkDO` relies on for single-view atomicity. Used for
- *   the anonymous share-view throttle specifically, where a security
- *   audit found the KV race meaningfully erodes the (secondary, behind
- *   share-ID entropy) brute-force defense.
+ *   BOTH the anonymous share-view throttle (`SHARE_VIEW_RATE_LIMIT`
+ *   binding) and the general-purpose per-IP limiter that gates every POST
+ *   request before RPC dispatch (`GENERAL_RATE_LIMIT` binding, see
+ *   `index.ts`) -- a security audit found the KV race meaningfully erodes
+ *   brute-force defenses on BOTH surfaces, including
+ *   completeCreateSession/startCreateSession/signup/password-reset, which
+ *   only the general-purpose limiter protects.
  *
  * Per-identity (IP or account ID) with configurable:
  * - maxRequests: tokens per window
