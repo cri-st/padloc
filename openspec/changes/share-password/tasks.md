@@ -33,17 +33,17 @@ Chain strategy: size-exception
 
 ## Phase 3: RPC Handlers (TDD)
 
-- [ ] 3.1 RED: extend `server.spec.ts`-style test: create/status/revoke reject unauthed; peek/reveal work anon. (Req: Auth, Revocation)
-- [ ] 3.2 GREEN: `@Handler` methods in `core/api.ts`: `createShare`, `peekShare`, `revealShare`, `getShareStatus`, `revokeShare`.
-- [ ] 3.3 GREEN: `Controller` bodies in `server.ts`; `_requireAuth` for create/status/revoke; `Server` ctor gains `shareStorage`. (Req: Revocation, View Receipt)
-- [ ] 3.4 REFACTOR: dedupe TTL-cap validation and expired/viewed/not-found error mapping.
+- [x] 3.1 RED: extend `server.spec.ts`-style test: create/status/revoke reject unauthed; peek/reveal work anon. (Req: Auth, Revocation)
+- [x] 3.2 GREEN: `@Handler` methods in `core/api.ts`: `createShare`, `peekShare`, `revealShare`, `getShareStatus`, `revokeShare`.
+- [x] 3.3 GREEN: `Controller` bodies in `server.ts`; `_requireAuth` for create/status/revoke; `Server` ctor gains `shareStorage`. (Req: Revocation, View Receipt)
+- [x] 3.4 REFACTOR: dedupe TTL-cap validation and expired/viewed/not-found error mapping.
 
 ## Phase 4: Worker Wiring & Rate Limit
 
-- [ ] 4.1 `worker/index.ts`: export `ShareLinkDO`; add 2nd `RateLimiter` keyed `share-view:${ip}`.
-- [ ] 4.2 RED: rate-limit test, rapid `revealShare` guesses, per-share/per-IP caps. (Req: Rate Limiting)
-- [ ] 4.3 GREEN: wire rate-limit check into `revealShare`/`peekShare`.
-- [ ] 4.4 `worker/server-factory.ts`: instantiate `DurableObjectShareStorage`, inject into `createServer`.
+- [x] 4.1 `worker/index.ts`: export `ShareLinkDO`; add 2nd `RateLimiter` keyed `share-view:${ip}`.
+- [x] 4.2 RED: rate-limit test, rapid `revealShare` guesses, per-share/per-IP caps. (Req: Rate Limiting)
+- [x] 4.3 GREEN: wire rate-limit check into `revealShare`/`peekShare`.
+- [x] 4.4 `worker/server-factory.ts`: instantiate `DurableObjectShareStorage`, inject into `createServer`.
 
 ## Phase 5: Client UI
 
