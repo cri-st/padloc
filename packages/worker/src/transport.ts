@@ -1,6 +1,7 @@
 import { Receiver, Request, Sender, Response as CoreResponse } from "@padloc/core/src/transport";
 import { marshal, unmarshal } from "@padloc/core/src/encoding";
 import { Err, ErrorCode } from "@padloc/core/src/error";
+import { ANONYMOUS_SHARE_METHODS } from "@padloc/core/src/share";
 import { IdempotencyStore, hashRequestBody } from "./idempotency";
 import { sanitizeError } from "./error";
 import { RateLimiter } from "./rate-limiter";
@@ -162,8 +163,21 @@ export class WorkerReceiver implements Receiver {
             );
         }
 
-        const bodyHash = await hashRequestBody(bodyText);
-        const existing = await this.config.idempotencyStore?.lookup(bodyHash);
+        // Anonymous share-view methods (peekShare/revealShare) MUST NEVER
+        // be idempotency-cached or replayed. The DO already provides the
+        // correct one-time-view semantics on its own (a fresh call to
+        // handler() re-checks viewed/expired/revoked every time); a cache
+        // sitting in front of it that replays a past SUCCESSFUL response
+        // would let a second party -- anyone who later sends a
+        // byte-identical anonymous request within the 1h TTL, which is
+        // realistic since these requests carry no session/nonce and the
+        // web client's DeviceInfo.id is always "" -- see the already-burned
+        // share's secret a second time, silently defeating the single-view
+        // guarantee and bypassing the dedicated share-view rate limiter
+        // (which only runs inside handler(), never on a cache hit).
+        const isAnonymousShareMethod = ANONYMOUS_SHARE_METHODS.has(req.method);
+        const bodyHash = isAnonymousShareMethod ? undefined : await hashRequestBody(bodyText);
+        const existing = bodyHash ? await this.config.idempotencyStore?.lookup(bodyHash) : undefined;
         if (existing) {
             const replayBody = marshal(existing);
             return new Response(replayBody, {
@@ -203,7 +217,9 @@ export class WorkerReceiver implements Receiver {
         const clientVersion = req.device?.appVersion;
         const raw = res.toRaw(clientVersion);
 
-        await this.config.idempotencyStore?.store(bodyHash, raw);
+        if (bodyHash) {
+            await this.config.idempotencyStore?.store(bodyHash, raw);
+        }
 
         const resBody = marshal(raw);
 

@@ -20,6 +20,30 @@ Authenticated sender MUST create shares for Login items only. Client MUST AES-25
 - WHEN sender requests a larger TTL
 - THEN `createShare` MUST reject with a validation error
 
+#### Scenario: Non-finite or non-positive TTL is rejected
+- GIVEN a client calls `createShare` directly (bypassing the UI's fixed TTL presets) with a non-numeric, zero, or negative `ttlSeconds`
+- WHEN the server validates the request
+- THEN `createShare` MUST reject with a validation error, never silently accept it as an effectively-permanent share
+
+### Requirement: Anonymity Boundary
+
+`peekShare` and `revealShare` MUST remain fully identity-free in both directions: the client MUST NEVER attach session authentication to these calls, and the server MUST NEVER process or persist authentication data for these methods even if a client attaches it anyway (e.g. a sender who is still logged in when opening their own share link in the same browser). Additionally, these two methods' request/response pairs MUST NEVER be idempotency-cached or replayed -- a cached successful `revealShare` result served to a second, different caller would let more than one party see an already-consumed one-time secret, defeating the single-view guarantee.
+
+#### Scenario: Logged-in sender's session is never attached to an anonymous view
+- GIVEN a sender is logged into their own account in the same browser
+- WHEN they open their own (or anyone else's) `/share/:id` link
+- THEN no session/account data is sent with the `peekShare`/`revealShare` call, and no session activity (`lastUsed`/`lastLocation`) is recorded as a result
+
+#### Scenario: A forged or stale auth block attached to an anonymous call is ignored, not processed
+- GIVEN a `peekShare` or `revealShare` request somehow carries an auth block (forged, or a leftover stale session)
+- WHEN the server receives it
+- THEN the server MUST ignore it outright (no signature verification, no session lookup, no persistence) and process the share view normally
+
+#### Scenario: A repeated identical anonymous request is never served from a cache
+- GIVEN a `revealShare` request already succeeded once for a given share id
+- WHEN a byte-identical request for the same share id arrives again (from the same or a different caller)
+- THEN the server MUST re-evaluate the share's real current state (not replay a cached response) and correctly report it as already-viewed
+
 #### Scenario: Unauthenticated creation attempt
 - GIVEN no valid session
 - WHEN `createShare` is called

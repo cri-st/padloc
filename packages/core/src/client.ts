@@ -5,6 +5,7 @@ import { Session } from "./session";
 import { Account } from "./account";
 import { Err, ErrorCode } from "./error";
 import { Serializable } from "./encoding";
+import { ANONYMOUS_SHARE_METHODS } from "./share";
 
 /**
  * Client state, keeping track of [[session]], [[account]] and [[device]] info
@@ -68,7 +69,7 @@ export class Client extends API {
         req.params = params;
         req.device = this.state.device;
 
-        if (session) {
+        if (session && !ANONYMOUS_SHARE_METHODS.has(method)) {
             await session.authenticate(req);
         }
 

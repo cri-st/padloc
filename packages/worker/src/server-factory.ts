@@ -36,6 +36,13 @@ export function createServer(env: Env): Server {
     changeLoggerConfig.enabled = true;
     const requestLoggerConfig = new RequestLoggerConfig();
     requestLoggerConfig.enabled = true;
+    // createShare's request params carry the share's raw AES ciphertext
+    // (CreateShareParams.encryptedData) -- excluded so it never lands in
+    // the general-purpose, TTL-independent request-log audit trail, which
+    // has no relationship to the share's own one-time-view/expiry
+    // lifecycle. peekShare/revealShare/revokeShare/getShareStatus params
+    // are just a ShareID, not sensitive on their own.
+    requestLoggerConfig.excludeEndpoints = [...requestLoggerConfig.excludeEndpoints, "createShare"];
     const changeLogger = new ChangeLogger(storage, changeLoggerConfig);
     const requestLogger = new RequestLogger(storage, requestLoggerConfig);
 

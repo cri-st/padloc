@@ -6,6 +6,20 @@ import { AccountID } from "./account";
 export type ShareID = string;
 
 /**
+ * RPC methods on the password-share-links surface that are intentionally
+ * callable WITHOUT a session -- the whole point of a share link is that the
+ * recipient never logs in. Both the client (never attach auth) and the
+ * server (never process/persist auth even if some client attaches it
+ * anyway) MUST treat these methods as identity-free. Security-relevant:
+ * see the `share-password` change's security-review follow-up -- an
+ * earlier version silently deanonymized a logged-in sender who opened
+ * their own share link in the same browser tab, and persisted their
+ * session's lastUsed/lastLocation as a side effect of the "anonymous"
+ * view.
+ */
+export const ANONYMOUS_SHARE_METHODS: ReadonlySet<string> = new Set(["peekShare", "revealShare"]);
+
+/**
  * Parameters for creating a new one-time share link. The client encrypts the
  * shared item locally (via [[SimpleContainer]]) and uploads only ciphertext
  * -- the server never sees the encryption key or plaintext.

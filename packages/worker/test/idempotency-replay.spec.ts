@@ -1,26 +1,29 @@
 /**
- * Regression test for a real idempotency-replay bug found and independently
- * verified during the `share-password` change's verify phase (see
- * openspec/changes/archive/2026-08-05-share-password/verify-report.md,
- * "Critical Security Analysis: Idempotency-Store Replay Bug").
+ * Regression tests for the idempotency store (packages/worker/src/transport.ts
+ * + idempotency.ts):
  *
- * Bug: `WorkerReceiver._handlePost()` cached the WRONG shape on a
- * successful RPC call -- `store()` was called with
- * `{ code: raw.error, message: raw.message || "", status: 200 }`, discarding
- * `raw.result` entirely. On a byte-identical replay (only reachable for
- * anonymous, session/nonce-less RPCs like `peekShare`/`revealShare`), the
- * handler wrapped WHATEVER was cached under `{ error: existing }` --
- * unconditionally, even for a genuinely successful original call -- so every
- * replay was misreported to the client as an error.
+ * 1. General mechanism: replaying a byte-identical request for an ORDINARY
+ *    (non-anonymous-share) method must preserve the real result/error
+ *    verbatim, not a synthetic always-error shape (the original bug fixed
+ *    in this file, safe for methods with per-caller entropy).
  *
- * Independently confirmed (see verify-report) that the bug could NEVER cause
- * a second real handler invocation (the idempotency lookup short-circuits
- * BEFORE `handler(req)` is ever called), so it could never compromise
- * share-password's single-view guarantee. It was purely a mislabeling bug:
- * a genuinely successful call, if replayed, showed as a generic error.
- *
- * Fix: cache and replay the REAL raw response (`res.toRaw()`) verbatim, for
- * both success and error cases, instead of a synthetic always-error shape.
+ * 2. Anonymous share-view methods (peekShare/revealShare) MUST NEVER be
+ *    idempotency-cached or replayed AT ALL. A security review of the
+ *    share-password feature found that (1)'s fix, while correct for
+ *    ordinary methods, is UNSAFE for these two specifically: their request
+ *    bodies have no session/nonce (anonymous by design) and the web
+ *    client's `DeviceInfo.id` is always `""`, so two different real
+ *    visitors requesting the SAME share id can hash to the SAME cache key.
+ *    Without this exclusion, whoever calls second within the 1h KV TTL
+ *    would silently receive the FIRST caller's cached successful
+ *    `revealShare` result -- including the real ciphertext of an
+ *    already-consumed one-time share -- defeating the feature's central
+ *    single-view guarantee. See
+ *    openspec/changes/archive/2026-08-05-share-password/verify-report.md's
+ *    "Critical Security Analysis" section for the ORIGINAL (now-superseded)
+ *    analysis, and this session's follow-up security audit for the
+ *    corrected understanding: the fix must EXCLUDE these methods entirely,
+ *    not just cache them "correctly".
  *
  * Run: npx ts-node --transpile-only --compiler-options '{"module":"commonjs"}' packages/worker/test/idempotency-replay.spec.ts
  */
@@ -148,6 +151,51 @@ async function main() {
         ok(res.headers.get("Idempotency-Replayed") !== "true", "different params: not treated as a replay");
         const body = await readBody(res);
         ok(JSON.stringify(body.result) === JSON.stringify({ echoed: [2] }), "different params: fresh result returned");
+    }
+
+    // ─── Scenario 4 (SECURITY): anonymous share methods NEVER get cached ──
+    // Simulates two DIFFERENT real visitors (e.g. the legitimate recipient
+    // and someone who later obtained the same link) sending the exact same
+    // revealShare(<id>) body -- realistic since these calls carry no
+    // session/nonce. A call-counting handler proves the DO-equivalent
+    // logic runs on EVERY call, never short-circuited by a cache hit.
+    for (const method of ["peekShare", "revealShare"]) {
+        const receiver = newReceiver();
+        let handlerCallCount = 0;
+        const handler = async (req: PlRequest): Promise<PlResponse> => {
+            handlerCallCount++;
+            const res = new PlResponse();
+            // First call succeeds (like a fresh/unviewed share); every call
+            // after re-runs the "real" one-time-view check and correctly
+            // reports not-found (like the DO would for an already-viewed
+            // or never-existed share) -- this is what MUST happen on every
+            // single call, never skipped via a cache hit.
+            if (handlerCallCount === 1) {
+                res.result = { secret: "only-once" };
+            } else {
+                res.error = { code: "not_found", message: "Share not found." };
+            }
+            return res;
+        };
+
+        const res1 = await receiver.handleFetch(buildHttpRequest(method, ["shareid123"]), handler, {}, {});
+        const body1 = await readBody(res1);
+        ok(!body1.error, `${method} first call: succeeds (fresh share)`);
+        ok(res1.headers.get("Idempotency-Replayed") !== "true", `${method} first call: never marked as a replay`);
+
+        // Byte-identical second request (same method+params) -- simulates
+        // a DIFFERENT visitor who obtained the same link, or a retry.
+        const res2 = await receiver.handleFetch(buildHttpRequest(method, ["shareid123"]), handler, {}, {});
+        ok(
+            res2.headers.get("Idempotency-Replayed") !== "true",
+            `${method} replay attempt: NEVER served from cache (no Idempotency-Replayed header)`
+        );
+        const body2 = await readBody(res2);
+        ok(
+            body2.error?.code === "not_found",
+            `${method} replay attempt: handler ran AGAIN and correctly reported not-found (real one-time-view check), not a cached success`
+        );
+        ok(handlerCallCount === 2, `${method}: handler invoked on EVERY call (2/2), never short-circuited by a cache hit`);
     }
 
     console.log(`\n${passed} passed, ${failed} failed`);

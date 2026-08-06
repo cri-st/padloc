@@ -65,7 +65,15 @@ import { KeyStoreEntry } from "./key-store";
 import { Config, ConfigParam } from "./config";
 import { Provisioner, Provisioning, ProvisioningStatus, StubProvisioner } from "./provisioning";
 import { V3Compat } from "./v3-compat";
-import { CreateShareParams, ShareData, ShareID, ShareLinkInfo, ShareStatus, ShareStorage } from "./share";
+import {
+    ANONYMOUS_SHARE_METHODS,
+    CreateShareParams,
+    ShareData,
+    ShareID,
+    ShareLinkInfo,
+    ShareStatus,
+    ShareStorage,
+} from "./share";
 
 /** Server configuration */
 export class ServerConfig extends Config {
@@ -225,7 +233,11 @@ export class Controller extends API {
     }
 
     async authenticate(req: Request, ctx: Context) {
-        if (!req.auth) {
+        // Anonymous share-view methods (peekShare/revealShare) MUST stay
+        // identity-free even if a client attaches auth (e.g. a logged-in
+        // sender opening their own share link in the same browser tab) --
+        // never verify/persist it. See ANONYMOUS_SHARE_METHODS's doc comment.
+        if (!req.auth || ANONYMOUS_SHARE_METHODS.has(req.method)) {
             return;
         }
 
@@ -1937,12 +1949,21 @@ export class Controller extends API {
         this.log("share.revoke", { share: { id } });
     }
 
-    /** Rejects sender-requested TTLs above the configured maximum (`ServerConfig.shareLinkMaxTtlSeconds`). */
+    /**
+     * Rejects sender-requested TTLs that are not a finite, positive number
+     * of seconds, or that exceed the configured maximum
+     * (`ServerConfig.shareLinkMaxTtlSeconds`). Must reject non-finite
+     * values explicitly -- `NaN > shareLinkMaxTtlSeconds` is `false`, so a
+     * plain upper-bound check alone would silently accept a non-numeric
+     * ttlSeconds (e.g. from a client bypassing the UI and calling the RPC
+     * directly), which would then make every expiry comparison against it
+     * evaluate to `false`, leaving the share effectively permanent.
+     */
     private _validateShareTtl(ttlSeconds: number): void {
-        if (ttlSeconds > this.config.shareLinkMaxTtlSeconds) {
+        if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0 || ttlSeconds > this.config.shareLinkMaxTtlSeconds) {
             throw new Err(
                 ErrorCode.BAD_REQUEST,
-                `Share link ttl must not exceed ${this.config.shareLinkMaxTtlSeconds} seconds.`
+                `Share link ttl must be a positive number of seconds, not exceeding ${this.config.shareLinkMaxTtlSeconds}.`
             );
         }
     }
