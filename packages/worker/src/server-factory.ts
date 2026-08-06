@@ -24,6 +24,7 @@ import { WorkerPlatform } from "./platform";
 import { Env } from "./env";
 import { AccountLockProvider, InProcessAccountLockProvider } from "@padloc/core/src/account-lock";
 import { withAccountLocks } from "./locks/account-lock";
+import { captureHqException } from "./hq-instrumentation";
 
 export function createServer(env: Env): Server {
     setPlatform(new WorkerPlatform());
@@ -39,7 +40,16 @@ export function createServer(env: Env): Server {
     // `@padloc/core/src/account-lock.ts`). Falls back to the in-process
     // mutex (still correct for a single isolate, just not across the
     // Worker's multiple concurrent isolates) when `ACCOUNT_LOCK` isn't
-    // bound, rather than silently disabling locking altogether.
+    // bound. Unlike the previous silent fallback, this is now reported
+    // (mirrors the `ALLOW_ORIGIN === '*'` guard in index.ts) so an
+    // operator finds out their lockout protection is degraded across
+    // isolates instead of it failing open invisibly under real load.
+    if (!env.ACCOUNT_LOCK && (env.HQ_ENVIRONMENT === "production" || env.HQ_ENVIRONMENT === "staging")) {
+        captureHqException(
+            new Error(`ACCOUNT_LOCK durable object binding missing in ${env.HQ_ENVIRONMENT}`),
+            { "padloc.error.code": "account_lock_binding_missing" }
+        );
+    }
     const inProcessAccountLockFallback = new InProcessAccountLockProvider();
     const accountLock: AccountLockProvider = {
         withLock: (ids, fn) =>

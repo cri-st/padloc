@@ -158,7 +158,40 @@ export class CreateSessionParams extends Serializable {
     }
 }
 
-const srpIds = new Map<AccountID, string>();
+// SECURITY: unbounded growth fix -- this Map is module-level (shared by
+// every Controller instance / request in the process, not per-session),
+// and `initAuth` used to `.set()` into it with no corresponding
+// `.delete()` anywhere, on an endpoint reachable without any prior
+// authentication. An attacker registering many distinct emails (or just
+// calling `initAuth` repeatedly for arbitrary/nonexistent ones) could
+// grow this Map without bound, a low-cost memory-exhaustion vector in a
+// long-lived process (self-hosted server, or a Worker isolate reused
+// across requests). Entries now carry a TTL and are opportunistically
+// pruned, plus a hard size cap as a backstop against pure-volume abuse
+// within that TTL window.
+interface SrpIdEntry {
+    srpId: string;
+    expiresAt: number;
+}
+const SRP_ID_TTL_MS = 5 * 60 * 1000;
+const SRP_ID_MAX_ENTRIES = 10_000;
+const srpIds = new Map<AccountID, SrpIdEntry>();
+
+function pruneSrpIds() {
+    const now = Date.now();
+    for (const [accountId, entry] of srpIds) {
+        if (entry.expiresAt <= now) {
+            srpIds.delete(accountId);
+        }
+    }
+    while (srpIds.size > SRP_ID_MAX_ENTRIES) {
+        const oldestKey = srpIds.keys().next().value;
+        if (oldestKey === undefined) {
+            break;
+        }
+        srpIds.delete(oldestKey);
+    }
+}
 
 type Constructor<T> = new (...args: any[]) => T;
 
@@ -190,8 +223,26 @@ export const V3Compat = (base: Constructor<Controller>) => {
         @Handler(RetrieveMFATokenParams, RetrieveMFATokenResponse)
         async retrieveMFAToken({ email, code, purpose: legacyPurpose }: RetrieveMFATokenParams) {
             const purpose = mapV3AuthPurpose(legacyPurpose);
-            try {
+            // SECURITY: serialized per-email alongside completeAuthRequest/
+            // completeCreateSession (see account-lock.ts) and gated by the
+            // SAME persistent lockout counter (auth.failedLoginAttempts/
+            // lockedUntil). This deprecated-but-still-reachable endpoint
+            // (V3Compat is always mixed into the production Controller) used
+            // to have no lock and no persistent lockout check at all, so it
+            // could be used to brute-force the 6-digit email verification
+            // code -- and, since a fresh AuthRequest is free via
+            // requestMFACode, to fully bypass the lockout that protects
+            // completeAuthRequest -- ultimately enabling account takeover via
+            // recoverAccount. Keep this in lockstep with completeAuthRequest.
+            return this.accountLock.withLock([(email || "").trim().toLocaleLowerCase()], async () => {
                 const auth = await this._getAuth(email);
+
+                if (auth.lockedUntil && auth.lockedUntil.getTime() > Date.now()) {
+                    throw new Err(
+                        ErrorCode.AUTHENTICATION_TRIES_EXCEEDED,
+                        "Too many failed login attempts. Please try again later."
+                    );
+                }
 
                 const request = auth.authRequests.find(
                     (m) =>
@@ -235,6 +286,15 @@ export const V3Compat = (base: Constructor<Controller>) => {
                     await this.storage.save(auth);
                 } catch (e) {
                     request.tries++;
+                    // Feed the SAME persistent per-account counter the modern
+                    // completeAuthRequest flow uses, so unlimited free
+                    // guesses via fresh AuthRequests (tries always
+                    // resettable to 0 via requestMFACode) still eventually
+                    // trip the 10-attempt/15-minute lockout.
+                    ++auth.failedLoginAttempts;
+                    if (auth.failedLoginAttempts >= 10) {
+                        auth.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+                    }
                     await this.storage.save(auth);
                     throw e;
                 }
@@ -270,9 +330,7 @@ export const V3Compat = (base: Constructor<Controller>) => {
                     hasLegacyAccount,
                     legacyToken,
                 });
-            } catch (e) {
-                throw e;
-            }
+            });
         }
 
         /**
@@ -285,7 +343,8 @@ export const V3Compat = (base: Constructor<Controller>) => {
             const { accountId, srpId, keyParams, B } = await this.startCreateSession(
                 new StartCreateSessionParams({ email, authToken: verify })
             );
-            srpIds.set(accountId, srpId);
+            pruneSrpIds();
+            srpIds.set(accountId, { srpId, expiresAt: Date.now() + SRP_ID_TTL_MS });
             return new InitAuthResponse({ account: accountId, keyParams, B });
         }
 
@@ -295,7 +354,9 @@ export const V3Compat = (base: Constructor<Controller>) => {
          */
         @Handler(CreateSessionParams, Session)
         createSession({ account, M, A }: CreateSessionParams): Promise<Session> {
-            const srpId = srpIds.get(account);
+            const entry = srpIds.get(account);
+            srpIds.delete(account);
+            const srpId = entry && entry.expiresAt > Date.now() ? entry.srpId : undefined;
             return this.completeCreateSession(
                 new CompleteCreateSessionParams({
                     srpId,

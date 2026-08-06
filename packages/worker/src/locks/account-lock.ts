@@ -129,8 +129,17 @@ interface AccountLockStub {
 }
 
 async function acquireLock(id: string, lockNamespace: DurableObjectNamespace): Promise<LockTicket> {
-    const stub = lockNamespace.get(lockNamespace.idFromName(id)) as unknown as AccountLockStub;
-    await stub.acquire(id, 30_000);
+    // SECURITY: always normalize before deriving the DO name. `idFromName`
+    // is case-sensitive, so an unnormalized caller-controlled id (e.g. an
+    // email straight from a request body) would let two differently-cased
+    // variants of the SAME logical identity map to two DIFFERENT DO
+    // instances -- defeating the mutual exclusion this lock exists to
+    // provide (see completeAuthRequest, which locks by raw client email).
+    // Normalizing unconditionally here makes this safe regardless of what
+    // any current or future caller passes in.
+    const key = id.trim().toLowerCase();
+    const stub = lockNamespace.get(lockNamespace.idFromName(key)) as unknown as AccountLockStub;
+    await stub.acquire(key, 30_000);
     return {
         release: () => stub.release(),
     };
@@ -155,7 +164,12 @@ export async function withAccountLocks<T>(
         throw new Error("ACCOUNT_LOCK durable object namespace not configured");
     }
 
-    const sorted = [...ids].sort();
+    // Normalize + dedupe: acquireLock() also normalizes (defense in depth),
+    // but deduping HERE on the normalized form is what prevents a caller
+    // that passes the same identity twice (or two different-cased spellings
+    // of it) from acquiring its own lock a second time and deadlocking
+    // itself for up to the 30s TTL.
+    const sorted = [...new Set(ids.map((id) => id.trim().toLowerCase()))].sort();
 
     const tickets: LockTicket[] = [];
     for (const id of sorted) {

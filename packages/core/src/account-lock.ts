@@ -40,7 +40,12 @@ export class InProcessAccountLockProvider implements AccountLockProvider {
     private _tails = new Map<string, Promise<void>>();
 
     async withLock<T>(ids: string[], fn: () => Promise<T>): Promise<T> {
-        const sorted = [...new Set(ids)].sort();
+        // Normalize before deduping/sorting: identities are typically
+        // emails, and case differences must not defeat mutual exclusion
+        // (see the DO-backed sibling implementation in
+        // packages/worker/src/locks/account-lock.ts for the concrete bug
+        // this closes).
+        const sorted = [...new Set(ids.map((id) => id.trim().toLowerCase()))].sort();
         const releases: (() => void)[] = [];
 
         for (const id of sorted) {

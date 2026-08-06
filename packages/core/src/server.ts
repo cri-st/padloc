@@ -86,9 +86,21 @@ export class ServerConfig extends Config {
     @ConfigParam()
     reportErrors = "";
 
-    /** Maximum accepted request age */
+    /**
+     * Maximum accepted request age. This is the ONLY anti-replay control
+     * on signed requests (Session.authenticate signs `sessionId|time|body`
+     * with no nonce/one-time-use tracking, see session.ts) -- any request
+     * captured by a party positioned to observe it (a logging proxy, a
+     * compromised extension, a leaked server log) can be replayed
+     * byte-for-byte and will be accepted as long as it's within this
+     * window. Previously 1 hour, which is a wide window for a
+     * timestamp-only check; reduced to 5 minutes (generous for real
+     * clients/clock skew) to shrink -- not eliminate -- that exposure.
+     * Closing it fully would need a persistent nonce/signature cache with
+     * its own TTL, which is a larger change than this default tweak.
+     */
     @ConfigParam("number")
-    maxRequestAge = 60 * 60 * 1000;
+    maxRequestAge = 5 * 60 * 1000;
 
     /** Whether or not to require email verification before creating an account */
     @ConfigParam("boolean")
@@ -495,7 +507,7 @@ export class Controller extends API {
         // password (SRP) and every MFA/auth-token verification path, so it
         // must be protected by the same lock to avoid the identical
         // concurrent-guess race.
-        return this.accountLock.withLock([email], async () => {
+        return this.accountLock.withLock([(email || "").trim().toLocaleLowerCase()], async () => {
             const auth = (this.context.auth = await this._getAuth(email));
 
             // Persistent per-account lockout (see completeCreateSession).
@@ -752,7 +764,7 @@ export class Controller extends API {
         // only the last write landed and the counter only ever advanced
         // by 1 per burst regardless of how many guesses actually
         // happened, completely defeating the 10-attempt lockout.
-        return this.accountLock.withLock([acc.email], async () => {
+        return this.accountLock.withLock([(acc.email || "").trim().toLocaleLowerCase()], async () => {
             this.context.account = acc;
             const auth = (this.context.auth = await this._getAuth(acc.email));
             this.context.provisioning = await this.provisioner.getProvisioning(auth);
@@ -1929,7 +1941,7 @@ export class Controller extends API {
         }
 
         att.id = await uuid();
-        await this.attachmentStorage.put(att);
+        await this.attachmentStorage.put(att, account.id);
 
         this.log("vault.createAttachment", {
             attachment: { type: att.type, size: att.size, id: att.id },
