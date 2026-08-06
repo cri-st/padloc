@@ -15,9 +15,6 @@ export class RichContent extends LitElement {
     @property()
     type: "plain" | "markdown" | "html" = "markdown";
 
-    @property({ type: Boolean })
-    sanitize = true;
-
     static styles = [shared, icons, content];
 
     updated() {
@@ -37,14 +34,21 @@ export class RichContent extends LitElement {
     render() {
         switch (this.type) {
             case "markdown":
-                return markdownToLitTemplate(this.content, this.sanitize);
+                // SECURITY: `sanitize` used to be an externally-settable
+                // `@property` that let a caller render either markdown or
+                // raw HTML completely unsanitized. No live call site ever
+                // set it to `false` (verified by grep across packages/app),
+                // but the component itself is reused for content that can
+                // originate from another party (org status messages,
+                // provisioning/billing pages, item notes) -- removed
+                // entirely so no future caller can accidentally/silently
+                // disable sanitization.
+                return markdownToLitTemplate(this.content);
             case "html":
-                const content = this.sanitize
-                    ? DOMPurify.sanitize(this.content, {
-                          ALLOWED_TAGS: [...MARKDOWN_ALLOWED_TAGS, "pl-icon"],
-                          ALLOWED_ATTR: [...MARKDOWN_ALLOWED_ATTR, "icon"],
-                      })
-                    : this.content;
+                const content = DOMPurify.sanitize(this.content, {
+                    ALLOWED_TAGS: [...MARKDOWN_ALLOWED_TAGS, "pl-icon"],
+                    ALLOWED_ATTR: [...MARKDOWN_ALLOWED_ATTR, "icon"],
+                });
                 return html`${unsafeHTML(content)}`;
             default:
                 return html`${this.content}`;
