@@ -65,6 +65,7 @@ import { KeyStoreEntry } from "./key-store";
 import { Config, ConfigParam } from "./config";
 import { Provisioner, Provisioning, ProvisioningStatus, StubProvisioner } from "./provisioning";
 import { V3Compat } from "./v3-compat";
+import { CreateShareParams, ShareData, ShareID, ShareLinkInfo, ShareStatus, ShareStorage } from "./share";
 
 /** Server configuration */
 export class ServerConfig extends Config {
@@ -190,6 +191,10 @@ export class Controller extends API {
 
     get attachmentStorage() {
         return this.server.attachmentStorage;
+    }
+
+    get shareStorage() {
+        return this.server.shareStorage;
     }
 
     get legacyServer() {
@@ -1870,6 +1875,91 @@ export class Controller extends API {
         });
     }
 
+    async createShare(params: CreateShareParams): Promise<ShareLinkInfo> {
+        const { account } = this._requireAuth();
+
+        this._validateShareTtl(params.ttlSeconds);
+
+        const id = await uuid();
+        await this._requireShareStorage().create(id, account.id, params);
+
+        this.log("share.create", { share: { id } });
+
+        return new ShareLinkInfo({ id, expiresAt: new Date(Date.now() + params.ttlSeconds * 1000) });
+    }
+
+    async peekShare(id: ShareID): Promise<ShareStatus> {
+        const result = await this._requireShareStorage().peek(id);
+        return this._shareStatusOrNotFound(result);
+    }
+
+    async revealShare(id: ShareID): Promise<ShareData> {
+        const data = await this._requireShareStorage().reveal(id);
+
+        if (!data) {
+            throw this._shareNotFoundError();
+        }
+
+        this.log("share.reveal", { share: { id } });
+
+        return data;
+    }
+
+    async getShareStatus(id: ShareID): Promise<ShareStatus> {
+        const { account } = this._requireAuth();
+        const result = await this._requireShareStorage().getStatus(id, account.id);
+        return this._shareStatusOrNotFound(result);
+    }
+
+    async revokeShare(id: ShareID): Promise<void> {
+        const { account } = this._requireAuth();
+        const revoked = await this._requireShareStorage().revoke(id, account.id);
+
+        if (!revoked) {
+            throw this._shareNotFoundError();
+        }
+
+        this.log("share.revoke", { share: { id } });
+    }
+
+    /** Rejects sender-requested TTLs above the configured maximum (`ServerConfig.shareLinkMaxTtlSeconds`). */
+    private _validateShareTtl(ttlSeconds: number): void {
+        if (ttlSeconds > this.config.shareLinkMaxTtlSeconds) {
+            throw new Err(
+                ErrorCode.BAD_REQUEST,
+                `Share link ttl must not exceed ${this.config.shareLinkMaxTtlSeconds} seconds.`
+            );
+        }
+    }
+
+    /**
+     * Content-free by design: a missing, expired, already-viewed, and
+     * revoked share are all indistinguishable from this error alone --
+     * neither an anonymous recipient nor the sender can tell which
+     * terminal state produced it.
+     */
+    private _shareNotFoundError(): Err {
+        return new Err(ErrorCode.NOT_FOUND, "Share not found.");
+    }
+
+    private _shareStatusOrNotFound(result: { expired: boolean; viewed: boolean } | ShareStatus | null): ShareStatus {
+        if (!result) {
+            throw this._shareNotFoundError();
+        }
+
+        return result instanceof ShareStatus
+            ? result
+            : new ShareStatus({ expired: result.expired, viewed: result.viewed });
+    }
+
+    private _requireShareStorage(): ShareStorage {
+        if (!this.shareStorage) {
+            throw new Err(ErrorCode.NOT_SUPPORTED, "Password sharing is not supported on this server.");
+        }
+
+        return this.shareStorage;
+    }
+
     async getLegacyData({ email, verify }: GetLegacyDataParams) {
         const auth = (this.context.auth = await this._getAuth(email));
         this.context.provisioning = await this.provisioner.getProvisioning(auth);
@@ -2310,7 +2400,9 @@ export class Server {
         public provisioner: Provisioner = new StubProvisioner(),
         public changeLogger?: ChangeLogger,
         public requestLogger?: RequestLogger,
-        public legacyServer?: LegacyServer
+        public legacyServer?: LegacyServer,
+        /** Password share link storage (worker-hosted only; undefined disables sharing) */
+        public shareStorage?: ShareStorage
     ) {}
 
     private _requestQueue = new Map<AccountID | OrgID, Promise<void>>();

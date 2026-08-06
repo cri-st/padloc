@@ -14,6 +14,7 @@ import { DeviceInfo } from "./platform";
 import { Provisioning, AccountProvisioning } from "./provisioning";
 import { StorageListOptions, StorageQuery } from "./storage";
 import { ChangeLogEntry, RequestLogEntry } from "./logging";
+import { CreateShareParams, ShareData, ShareID, ShareLinkInfo, ShareStatus } from "./share";
 
 /**
  * Api parameters for creating a new Account to be used with [[API.createAccount]].
@@ -724,6 +725,56 @@ export class API {
 
     @Handler(DeleteAttachmentParams, undefined)
     deleteAttachment(_attachment: DeleteAttachmentParams): PromiseWithProgress<void> {
+        throw "Not implemented";
+    }
+
+    /**
+     * Create a one-time, expiring share link for a Login item. The client
+     * has already AES-256 encrypted the item locally -- the server only
+     * ever sees ciphertext plus encryption params.
+     *
+     * @authentication_required
+     */
+    @Handler(CreateShareParams, ShareLinkInfo)
+    createShare(_params: CreateShareParams): PromiseWithProgress<ShareLinkInfo> {
+        throw "Not implemented";
+    }
+
+    /**
+     * Non-destructive lookup for an anonymous recipient's page load. MUST
+     * NOT consume the share's single view.
+     */
+    @Handler(String, ShareStatus)
+    peekShare(_id: ShareID): PromiseWithProgress<ShareStatus> {
+        throw "Not implemented";
+    }
+
+    /**
+     * Atomically consumes the share's single view and returns its
+     * ciphertext. Anonymous -- no authentication required.
+     */
+    @Handler(String, ShareData)
+    revealShare(_id: ShareID): PromiseWithProgress<ShareData> {
+        throw "Not implemented";
+    }
+
+    /**
+     * Owner-facing status lookup, including the view receipt timestamp.
+     *
+     * @authentication_required
+     */
+    @Handler(String, ShareStatus)
+    getShareStatus(_id: ShareID): PromiseWithProgress<ShareStatus> {
+        throw "Not implemented";
+    }
+
+    /**
+     * Revokes an unviewed share link.
+     *
+     * @authentication_required
+     */
+    @Handler(String, undefined)
+    revokeShare(_id: ShareID): PromiseWithProgress<void> {
         throw "Not implemented";
     }
 
