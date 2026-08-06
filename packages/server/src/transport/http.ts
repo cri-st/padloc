@@ -49,6 +49,26 @@ export class HTTPReceiver implements Receiver {
     constructor(public readonly config: HTTPReceiverConfig) {}
 
     async listen(handler: (req: Request) => Promise<Response>) {
+        // SECURITY: `allowOrigin: "*"` is the CONFIG DEFAULT (see
+        // HTTPReceiverConfig above) and has no equivalent to the Worker
+        // deployment's active guard (packages/worker/src/index.ts refuses
+        // to serve, returning 503, if ALLOW_ORIGIN resolves to '*' in
+        // production/staging). This server has no environment concept to
+        // gate on, so warn unconditionally at startup instead of staying
+        // silent -- direct impact is limited (Padloc's request
+        // authentication is HMAC-signed in the body, not cookie-based, so
+        // an open CORS origin alone can't forge authenticated requests),
+        // but it's still a real defense-in-depth gap relative to the
+        // Worker deployment and lets any web page read this API's
+        // responses cross-origin.
+        if (this.config.allowOrigin === "*") {
+            console.warn(
+                "[cors] transport.http.allowOrigin is set to '*' (the default) -- any website can read " +
+                    "this server's API responses cross-origin. Set the 'allowOrigin' field under " +
+                    "'transport.http' in your config file to your actual client origin for a production " +
+                    "deployment."
+            );
+        }
         const server = createServer(async (httpReq, httpRes) => {
             httpRes.on("error", (e) => {
                 // todo

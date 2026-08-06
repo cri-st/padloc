@@ -11,6 +11,26 @@ export class MixpanelConfig extends Config {
     excludeEvents?: string[];
 }
 
+// SECURITY: `log()` below used to spread the ENTIRE caller-supplied `data`
+// bag (plus account/provisioning/session context) into the Mixpanel
+// payload with only "kind"/"version" excluded -- any field a future
+// `this.log("some.event", {...})` call anywhere in the codebase adds
+// automatically gets sent to this third party unless it happens to match
+// one of those two names. Redact by field-name pattern (applied to the
+// FLATTENED, dot-joined keys, so nested fields are covered too) instead
+// of trusting every current and future caller to remember to exclude
+// sensitive data manually.
+const MIXPANEL_SENSITIVE_FIELD_PATTERN =
+    /(password|passphrase|\bsecret\b|verifier|private.?key|signing.?key|hmac.?key|encryption.?key|session.?key|^key$|aes.?key|rsa.?key|\biv\b|nonce|encrypted|ciphertext|vault(data)?$|auth.?proof|srp|token)/i;
+
+function redactSensitiveFields(flattened: Record<string, unknown>): Record<string, unknown> {
+    const redacted: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(flattened)) {
+        redacted[key] = MIXPANEL_SENSITIVE_FIELD_PATTERN.test(key) ? "[REDACTED]" : value;
+    }
+    return redacted;
+}
+
 function flatten(
     obj: any,
     {
@@ -87,7 +107,7 @@ export class MixpanelLogger implements Logger {
             try {
                 this._mixpanel.track(type, {
                     distinct_id,
-                    ...flatten(mixpanelData, { exclude: ["kind", "version"] }),
+                    ...redactSensitiveFields(flatten(mixpanelData, { exclude: ["kind", "version"] })),
                 });
             } catch (e) {}
         }

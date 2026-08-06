@@ -322,6 +322,26 @@ async function init(config: PadlocConfig) {
     const changeLogger = await initChangeLogger(config.changeLog, storage);
     const requestLogger = await initRequestLogger(config.requestLog, storage);
 
+    // SECURITY: `Server`'s default `accountLock` (no 10th constructor arg
+    // passed here) is `InProcessAccountLockProvider` -- an in-memory FIFO
+    // mutex that only serializes the persistent login-lockout critical
+    // section (Auth.failedLoginAttempts/lockedUntil) WITHIN this single
+    // Node process. The Cloudflare Worker deployment injects a real
+    // cross-isolate lock (Durable-Object-backed, see
+    // packages/worker/src/locks/account-lock.ts) precisely because a
+    // process-local mutex doesn't serialize anything across instances.
+    // Any self-hosted deployment running more than one replica behind a
+    // load balancer against the same shared database (a supported,
+    // documented pattern for this server) gets a narrower version of the
+    // same race an attacker could otherwise use to erode the 10-attempt
+    // lockout -- warn loudly at startup rather than leaving this silent.
+    console.warn(
+        "[account-lock] Using an in-process (non-distributed) login-lockout lock. " +
+            "If this server is deployed with more than one replica behind a load balancer, " +
+            "the persistent account-lockout counter is NOT reliably serialized across " +
+            "instances -- inject a distributed AccountLockProvider (e.g. backed by a Postgres " +
+            "advisory lock or Redis) for multi-instance deployments."
+    );
     const server = new Server(
         config.server,
         storage,
