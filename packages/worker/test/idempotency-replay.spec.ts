@@ -29,7 +29,7 @@
  */
 
 import { WorkerReceiver, WorkerReceiverConfig } from "../src/transport";
-import { Request as PlRequest, Response as PlResponse } from "@padloc/core/src/transport";
+import { Request as PlRequest, Response as PlResponse, RequestAuthentication } from "@padloc/core/src/transport";
 import { marshal } from "@padloc/core/src/encoding";
 import { IdempotencyStore } from "../src/idempotency";
 
@@ -67,10 +67,29 @@ function ok(cond: boolean, label: string) {
     }
 }
 
-function buildHttpRequest(method: string, params: unknown[]): globalThis.Request {
+function buildHttpRequest(method: string, params: unknown[], opts: { authenticated?: boolean } = {}): globalThis.Request {
     const req = new PlRequest();
     req.method = method;
     req.params = params;
+    // General-purpose idempotency caching now only applies to AUTHENTICATED
+    // requests (see transport.ts's `skipIdempotencyCache`) -- an
+    // unauthenticated request has no per-caller entropy (signature) and may
+    // hit handler-internal, state-dependent gates (e.g. the persistent
+    // login lockout) that a cache hit would silently bypass. Scenarios 1-3
+    // exercise the general mechanism, so they attach a minimal `auth` block
+    // by default; pass `authenticated: false` to simulate a pre-session call.
+    if (opts.authenticated !== false) {
+        req.auth = new RequestAuthentication({
+            session: "session-1",
+            // Fixed (not `new Date()`) so two calls built for the SAME
+            // logical request marshal to byte-identical bodies -- a fresh
+            // timestamp per call would make the idempotency hash differ
+            // between "first call" and "replay", defeating the very
+            // scenarios this test simulates.
+            time: new Date(0),
+            signature: new Uint8Array([1, 2, 3]),
+        });
+    }
     const body = marshal(req.toRaw());
     return new globalThis.Request("http://localhost/", {
         method: "POST",
@@ -196,6 +215,62 @@ async function main() {
             `${method} replay attempt: handler ran AGAIN and correctly reported not-found (real one-time-view check), not a cached success`
         );
         ok(handlerCallCount === 2, `${method}: handler invoked on EVERY call (2/2), never short-circuited by a cache hit`);
+    }
+
+    // ─── Scenario 5 (SECURITY): unauthenticated non-share methods are ALSO
+    // never cached ── generalizes Scenario 4's protection: `completeCreateSession`
+    // has no `req.auth` (there's no session yet) and checks handler-internal
+    // state (the persistent login lockout) on every call. A cache hit would
+    // silently skip that re-check for a byte-identical replayed request.
+    {
+        const receiver = newReceiver();
+        let handlerCallCount = 0;
+        const handler = async (): Promise<PlResponse> => {
+            handlerCallCount++;
+            const res = new PlResponse();
+            res.result = { call: handlerCallCount };
+            return res;
+        };
+
+        const res1 = await receiver.handleFetch(
+            buildHttpRequest("completeCreateSession", ["acct1"], { authenticated: false }),
+            handler,
+            {},
+            {}
+        );
+        ok(res1.headers.get("Idempotency-Replayed") !== "true", "unauthenticated method first call: never a replay");
+
+        const res2 = await receiver.handleFetch(
+            buildHttpRequest("completeCreateSession", ["acct1"], { authenticated: false }),
+            handler,
+            {},
+            {}
+        );
+        ok(
+            res2.headers.get("Idempotency-Replayed") !== "true",
+            "unauthenticated method replay attempt: NEVER served from cache"
+        );
+        ok(handlerCallCount === 2, "unauthenticated method: handler invoked on EVERY call, never short-circuited");
+    }
+
+    // ─── Scenario 6: authenticated requests are unaffected by Scenario 5's
+    // exclusion -- the general caching mechanism (Scenario 1) still applies
+    // when `req.auth` is present, confirming the fix narrows correctly
+    // rather than disabling caching altogether.
+    {
+        const receiver = newReceiver();
+        let handlerCallCount = 0;
+        const handler = async (): Promise<PlResponse> => {
+            handlerCallCount++;
+            const res = new PlResponse();
+            res.result = { call: handlerCallCount };
+            return res;
+        };
+
+        await receiver.handleFetch(buildHttpRequest("updateAccount", ["x"]), handler, {}, {});
+        const res2 = await receiver.handleFetch(buildHttpRequest("updateAccount", ["x"]), handler, {}, {});
+        ok(res2.headers.get("Idempotency-Replayed") === "true", "authenticated method replay: still served from cache");
+        ok(handlerCallCount === 1, "authenticated method: handler invoked only ONCE, second call was a cache hit");
     }
 
     console.log(`\n${passed} passed, ${failed} failed`);

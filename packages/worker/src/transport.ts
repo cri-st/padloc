@@ -175,8 +175,23 @@ export class WorkerReceiver implements Receiver {
         // share's secret a second time, silently defeating the single-view
         // guarantee and bypassing the dedicated share-view rate limiter
         // (which only runs inside handler(), never on a cache hit).
+        //
+        // Generalized to EVERY unauthenticated request (no `req.auth`),
+        // not just the two share methods above: `handler()` is where
+        // state-dependent, handler-internal gates run -- e.g.
+        // `completeCreateSession`'s persistent `auth.lockedUntil` account
+        // lockout check. A cache hit short-circuits BEFORE `handler()` is
+        // ever invoked, so replaying a byte-identical prior successful
+        // unauthenticated request (e.g. a captured `completeCreateSession`
+        // transcript) would silently skip that re-check for up to the 1h
+        // idempotency TTL. Authenticated requests are safe to cache: their
+        // `RequestAuthentication.signature` is a single caller's
+        // unforgeable proof, and `Controller.authenticate()` still runs
+        // for every non-cached call, so this exclusion only widens
+        // coverage for the class of bug already recognized above.
         const isAnonymousShareMethod = ANONYMOUS_SHARE_METHODS.has(req.method);
-        const bodyHash = isAnonymousShareMethod ? undefined : await hashRequestBody(bodyText);
+        const skipIdempotencyCache = isAnonymousShareMethod || !req.auth;
+        const bodyHash = skipIdempotencyCache ? undefined : await hashRequestBody(bodyText);
         const existing = bodyHash ? await this.config.idempotencyStore?.lookup(bodyHash) : undefined;
         if (existing) {
             const replayBody = marshal(existing);
