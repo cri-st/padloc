@@ -151,6 +151,222 @@ This is the one area where "3 years abandoned" did **not** rot the design — th
 
 ---
 
+## 8. Follow-up audit — August 6, 2026 (new surface added since this report)
+
+Substantial new security-relevant surface shipped after the original audit above:
+WebAuthn ported into the Worker (`packages/worker/src/auth/webauthn.ts`), a
+Durable-Object-backed rate limiter (`durable-objects/rate-limit.ts`), the
+password-share-links feature (`core/src/share.ts`,
+`durable-objects/share-link.ts`), a rewritten `idempotency.ts`, and the persistent
+per-account lockout from Phase 1 item 4. This section covers a dedicated
+re-audit of that new surface, run via six parallel adversarial reviews plus
+direct code verification. Findings already fixed by the share-password feature's
+own prior security review (commit `8a969eaa`) and the atomic share-view rate
+limiter (`1413e165`, `37736a3d`) are NOT repeated here.
+
+### 8.1 Critical — persistent lockout counter lost updates under concurrent guesses — **FIXED 2026-08-06**
+**`packages/core/src/server.ts`'s `completeCreateSession`**
+
+`Auth.failedLoginAttempts`/`lockedUntil` (Phase 1 item 4's own fix) were read
+from storage, mutated in memory, and saved back with **no lock at all**.
+`Storage.save()` is a blind upsert with no compare-and-swap on every backend
+this repo ships (D1, MongoDB, Postgres, LevelDB). N concurrent wrong-password
+`completeCreateSession` calls for the SAME account (each opened via its own
+free, unlimited `startCreateSession`) each read the same stale counter value
+before any of them saved — only the last write landed, so a burst of N
+concurrent guesses only ever advanced the counter by 1 instead of N,
+**completely defeating the 10-attempt lockout** for an attacker firing guesses
+in parallel rather than sequentially.
+
+**Fix:** added `packages/core/src/account-lock.ts` (`AccountLockProvider`
+interface + an `InProcessAccountLockProvider` default) and wired
+`Server.completeCreateSession`/`completeAuthRequest` to run their entire
+read-check-increment-save critical section inside
+`this.accountLock.withLock([email], ...)`. Both methods lock on the SAME
+key — the account's **email**, matching how `Auth` records are keyed —
+not on the account id: an earlier draft of this fix had
+`completeCreateSession` lock on `account` (the account id) while
+`completeAuthRequest` locked on `email`, two DIFFERENT keys guarding the
+SAME shared counter, which is not mutual exclusion at all and would have
+let a concurrent password guess and a concurrent MFA guess for the same
+account race past each other. Caught during review and fixed by resolving
+`completeCreateSession`'s account email BEFORE acquiring the lock (a plain
+read, outside the raced critical section) and locking on that. Regression
+test: `packages/core/test/lockout-shared-lock-key.spec.ts` asserts both
+methods request the identical lock key for the same account (confirmed to
+fail against the account-id-keyed version before this correction). The
+Worker injects a cross-isolate implementation in `server-factory.ts`
+backed by the existing (previously unused) `AccountLockDO`, falling back
+to the in-process mutex if `ACCOUNT_LOCK` isn't bound. Self-host keeps the
+in-process default, which fully closes the race for its
+single-Node-process deployment model.
+
+**A second, independent bug was found and fixed while verifying this fix**:
+`AccountLockDO` (`packages/worker/src/locks/account-lock.ts`) — the exact
+primitive this fix newly relies on — did not extend the runtime's
+`DurableObject` base class, so a real caller invoking it through a namespace
+binding would throw "does not support RPC" at runtime (this is why it had zero
+real callers before). Fixed by extending `DurableObject<Env>`. Its
+`acquire()`/`release()` logic also assigned the shared `_holder`/`_release`
+fields **before** the queue-wait `await`, letting a later concurrent
+`acquire()` call's synchronous prefix clobber an earlier caller's release
+function before that caller ever became the real holder — the earlier
+caller's `release()` then resolved the **wrong** (most recently registered)
+caller's gate, permanently deadlocking every ticket queued in between. A
+live 15-way concurrent `completeCreateSession` burst hung past its 30s test
+timeout before this was found and fixed (assignment moved to *after* the
+await, which is race-free since only one `acquire()` call can be executing
+that statement at a time). `session-contract.test.mjs`'s existing "Lock
+Serialization"/"Deadlock Prevention" tests exercise a hand-written
+`MockAccountLockDO`, not this real class, so they never caught it — another
+instance of this repo's known false-assurance-test pattern. New dedicated
+coverage: `packages/worker/test/account-lock-do.test.mjs`
+(`test:account-lock-do`, wired into `test:ci`), plus a genuine 15-way
+concurrent regression test added to `test:account-lockout-e2e`.
+
+### 8.2 High — MFA/auth-token verification has no persistent lockout, and its own per-request limit is trivially resettable — **FIXED 2026-08-06**
+**`packages/core/src/server.ts`'s `completeAuthRequest`**
+
+`auth.lockedUntil` was checked ONLY in `completeCreateSession` (the password
+path). `completeAuthRequest` — the shared verification entrypoint for TOTP,
+WebAuthn, and email-code authenticators, also used as the pre-password
+"untrusted device" auth-token gate reached via `startCreateSession` — never
+checked it, and its own `request.tries >= 3` guard is scoped to a single
+`AuthRequest` object that `startAuthRequest` can mint fresh (tries=0) for free
+and without limit. An account already locked from password guessing could
+still be hammered via its MFA authenticators with no real ceiling.
+
+**Fix:** `completeAuthRequest` now checks `auth.lockedUntil` up front and
+feeds failures into the SAME persistent `auth.failedLoginAttempts` counter the
+password path uses (also serialized via `accountLock`, see 8.1), so unlimited
+free guesses via fresh `AuthRequest`s still eventually trip the shared
+10-attempt/15-minute lockout.
+
+### 8.3 Low — WebAuthn/email/TOTP auth requests are not invalidated as single-use at the application layer — **FIXED 2026-08-06**
+**`packages/core/src/server.ts`'s `completeAuthRequest`, `packages/worker/src/auth/webauthn.ts`**
+
+Unlike TOTP's explicit monotonic-counter check, nothing prevented
+re-verifying an `AuthRequest` already marked `Verified`. For a platform
+WebAuthn authenticator whose signature counter never increments (typical for
+Touch ID/Face ID/Windows Hello, counter stays 0), the underlying library's own
+clone-detection is a no-op (`(counter > 0 || credential.counter > 0) &&
+counter <= credential.counter`), so a captured/replayed assertion could pass
+verification a second time within the exploitation window. Requires the
+attacker to already possess the exact signed assertion bytes (XSS/malicious
+extension/compromised proxy, not plain network sniffing under TLS), and the
+practical gain is marginal (no session is granted without the separately
+single-use-consumed auth token) — hence low severity, but cheap and correct
+to close regardless.
+
+**Fix:** `completeAuthRequest` now rejects re-verification with
+`request.status !== AuthRequestStatus.Started`.
+
+### 8.4 Medium — session-scoped failed-login alert can be silently evaded — **FIXED 2026-08-06**
+**`packages/core/src/server.ts`'s `completeCreateSession`**
+
+The `FailedLoginAttemptMessage` alert email was gated on
+`srpSession.failedAttempts >= 5` (resets on every fresh SRP session), fully
+independent of the persistent `auth.failedLoginAttempts >= 10` lockout
+threshold. An attacker pacing guesses at ≤4 per fresh session (e.g. 4, new
+session, 4, new session, 2) could reach — and even trigger — the 10-attempt
+lockout while never satisfying the alert's own condition, so the account
+owner would get zero warning for the entire attack, including the exact
+attempt that locked their account.
+
+**Fix:** the alert now also fires the instant the persistent counter
+transitions into a lockout (`auth.failedLoginAttempts >= 10 &&
+!auth.lockedUntil` at the moment of increment), independent of the
+per-session counter.
+
+### 8.5 High — general-purpose (login/signup/password-reset) rate limiter was left on the KV race the share-view limiter was already hardened against — **FIXED 2026-08-06**
+**`packages/worker/src/index.ts`, `rate-limiter.ts`**
+
+The atomic, Durable-Object-backed `DurableObjectRateLimiter` (built to close
+the KV `RateLimiter`'s documented get()-then-put() double-spend race) was
+wired ONLY to the anonymous share-view throttle (`peekShare`/`revealShare`).
+`config.rateLimiter` — the general-purpose limiter that gates every POST
+request at the transport layer, before RPC dispatch, and therefore the ONLY
+rate limit protecting `completeCreateSession`/`startCreateSession`/signup/
+password-reset — was still the racy KV implementation. An attacker firing N
+concurrent requests from one IP gets roughly N× the configured budget.
+
+**Fix:** `config.rateLimiter` now uses `DurableObjectRateLimiter` bound to a
+new `GENERAL_RATE_LIMIT` Durable Object binding (same `RateLimitDO` class,
+separate namespace from the share-view limiter), added to `env.ts`,
+`wrangler.toml` (dev/preview), `wrangler.local.toml.example`
+(staging/production template), and this environment's real, git-ignored
+`wrangler.local.toml` (the actual CrackIt staging deploy config present in
+this workspace).
+
+**⚠️ Deploy prerequisite — this fix is INERT until the next real deploy.**
+`DurableObjectRateLimiter` fails open (always-allow) when its namespace
+binding is undefined, by design (same as every other optional binding in
+this file) — so on any deployed environment where `GENERAL_RATE_LIMIT`
+isn't yet a live Cloudflare Durable Object binding, this change is a
+silent no-op and the general rate limiter keeps running on the
+**old, racy KV implementation** in production/staging until an operator
+actually runs `wrangler deploy` (or the repo's `deploy:staging`/
+`deploy:production` scripts) against the updated `wrangler.toml`/
+`wrangler.local.toml`. No code-only fix in this repo can force that
+redeploy; it requires the operator's own Cloudflare credentials per
+AGENTS.md's Secrets/Hosting sections. The SAME caveat applies to 8.1's
+`AccountLockDO` fix: `ACCOUNT_LOCK` is already a live binding, but the
+corrected `acquire()`/`release()` code inside it only takes effect once
+the updated Worker script is actually deployed.
+
+### 8.6 Medium — idempotency cache-hit bypassed handler-internal state checks (e.g. the lockout) for unauthenticated requests — **FIXED 2026-08-06**
+**`packages/worker/src/transport.ts`**
+
+The idempotency cache short-circuits BEFORE `handler()` (and therefore before
+`Controller.authenticate()` and any handler-internal state check) runs. It
+already excluded the two anonymous share-view methods for exactly this
+reason, but the same reasoning wasn't generalized: replaying a byte-identical
+prior successful `completeCreateSession` request (which has no `req.auth` —
+there's no session yet) within the 1h idempotency TTL would skip the
+persistent lockout re-check entirely. Requires the attacker to already
+possess a previous successful request's exact bytes (a strong precondition —
+not a way to forge a new login), so this was scored medium, not high.
+
+**Fix:** idempotency caching is now skipped for every request with no
+`req.auth`, not just the two share methods (which remain excluded too, for
+clarity). Authenticated requests are unaffected and still cached/replayed as
+before.
+
+### 8.7 Low — anonymous pre-reveal status never reported a revoked share as revoked — **FIXED 2026-08-06**
+**`packages/worker/src/durable-objects/share-link.ts`**
+
+`ShareLinkDO.peek()` (backing the anonymous `peekShare` RPC the share-view
+landing page polls on load) returned only `{expired, viewed}`, never
+`revoked`, even though the sibling `getStatus()` and the underlying row both
+track it. A recipient loading a link the sender had already revoked still
+saw the normal "Reveal" button as if the link were valid; clicking it then
+failed with the generic content-free "not found" state. No secret was ever
+disclosed (`revealShare`'s SQL independently re-checks `revoked=0`), so this
+was a state-integrity/UX bug, not a confidentiality bypass.
+
+**Fix:** `peek()` now returns `revoked`, threaded through
+`SharePeekResult`/`ShareStorage.peek()`/`_shareStatusOrNotFound`/
+`ShareStatus`. The share-view page now has a dedicated "Link Revoked" state
+instead of falling back to the generic invalid-link message.
+
+### 8.8 Informational — no action taken this round
+- Anonymous share-link field scoping (which item fields get shared) is
+  enforced only client-side (architecturally unavoidable — the server never
+  decrypts the payload); `packages/app/src/lib/share.ts`'s doc comments
+  overstate this as "structurally impossible... regardless of user choice."
+  Worth softening the wording so a future reviewer doesn't rely on a
+  server-side guarantee that doesn't exist.
+- KDBX import fully delegates untrusted binary/XML parsing to the `kdbxweb`
+  dependency (2021, v2.1.1) with no sandboxing; no vulnerability found in the
+  actual browser runtime path (native `DOMParser`, no XXE), but it's a new
+  trust-boundary shift worth tracking as the dependency ages.
+- Raw parser/crypto exception messages are shown verbatim in the KeePass
+  import dialog on failure (client-only, no cross-user impact).
+
+---
+
+---
+
 ## Healing Plan — prioritized
 
 **Phase 0 — ship this week (exploitable now, production):**
@@ -167,9 +383,19 @@ This is the one area where "3 years abandoned" did **not** rot the design — th
 9. ✅ **FIXED** Swap the auth-token `===` to `timingSafeEqual`.
 
 **Phase 2 — hardening & prevent re-rot:**
-10. Wire or delete `log-redaction.ts`; rename `AccountLockDO` → `RequestSerializationDO` (or actually wire it if the race-condition protection is still needed).
-11. Add per-account/per-purpose rate limiting for login/signup/password-reset (keyed on email, not just IP) — decide fail-open vs. fail-closed for auth routes specifically when KV is unavailable.
-12. Non-root Docker user for `packages/server`; add CSP/HSTS/`X-Content-Type-Options` to nginx.
+10. `log-redaction.ts` remains unwired dead code (still 0 real callers; the associated test still only checks unrelated call sites, never imports the module — same false-assurance pattern as before). `AccountLockDO` is no longer misleadingly named: Phase 3 below actually wired it in for real per-account request serialization (fixing a genuine deadlock bug in the process), so the binding name now matches a real security control.
+11. ~~Add per-account/per-purpose rate limiting for login/signup/password-reset~~ — **PARTIALLY FIXED**: Phase 1 item 4 already added persistent per-account lockout for login (password guessing), and Phase 3 below closes the matching gap for the MFA/auth-token path and hardens the general per-IP limiter. Signup and password-reset (`AuthPurpose.Signup`/`Recover` token requests) still have no per-account throttle beyond the general per-IP limiter. Fail-open vs. fail-closed for auth routes specifically (when the rate-limit DO/KV binding is unavailable) is still undecided — both implementations fail open by design.
+12. Self-host (`packages/server` + nginx) Docker-root and missing CSP/HSTS/`X-Content-Type-Options` — **still fully pending, unchanged**. The PRODUCTION Worker surface's equivalent gap is already closed: `packages/worker/src/observability/security-headers.ts` (added after this report, undocumented until now) sets CSP/HSTS/`X-Content-Type-Options`/etc. on effectively every real Worker response via `responseHeaders()` in `transport.ts`/`index.ts` — with one confirmed minor gap: `index.ts`'s pre-config `ALLOW_ORIGIN`-misconfigured 503 used manual headers instead of `responseHeaders()` (**FIXED 2026-08-06**, same session as Phase 3).
 13. Add Dependabot/Renovate + an `npm audit`/`audit-ci` CI gate scoped to production runtime deps (not dev tooling) so staleness surfaces continuously instead of accumulating for years again.
 14. Decide and document whether `packages/server` (self-host, Postgres/Mongo/S3-backed) remains a supported target going forward, or whether the Worker is now the sole production surface per AGENTS.md — this determines whether items 4/7/6-self-host-deps are worth the investment or whether that path should be formally deprecated.
 15. Optional: RSA-3072 for newly-created org/account keys (needs a migration path for existing 2048-bit keys — not urgent, current NIST-approved through ~2030).
+
+**Phase 3 — follow-up audit fixes, 2026-08-06 (see Section 8 for full detail):**
+16. ✅ **FIXED (code) — ⚠️ NOT YET LIVE, needs deploy** 8.1 (critical): persistent lockout counter race under concurrent guesses, closed via a new `accountLock` abstraction (`core/src/account-lock.ts`) wired into `completeCreateSession`/`completeAuthRequest`, both locking on the SAME key (account email — an earlier draft had them on two different keys, caught in review and corrected). Backed by `AccountLockDO` on the Worker. Also fixed a genuine pre-existing deadlock bug in `AccountLockDO` itself (missing `extends DurableObject`, plus a holder/release race), found while verifying this fix. New tests: `test:account-lock-do`, `core/test/lockout-shared-lock-key.spec.ts`, a 15-way concurrent case added to `test:account-lockout-e2e`. **Takes effect only on the next real Worker deploy.**
+17. ✅ **FIXED** 8.2 (high): MFA/auth-token path (`completeAuthRequest`) now checks the persistent lockout and feeds it on failure, closing the "fresh `AuthRequest` = free tries" gap.
+18. ✅ **FIXED** 8.3 (low): `completeAuthRequest` now rejects re-verifying an already-`Verified` request (WebAuthn single-use hardening).
+19. ✅ **FIXED** 8.4 (medium): failed-login alert email now also fires on the persistent-counter lockout transition, not just the resettable per-session counter.
+20. ✅ **FIXED (code) — ⚠️ NOT YET LIVE, needs deploy** 8.5 (high): general-purpose per-IP rate limiter (gating login/signup/password-reset) migrated from the racy KV implementation to the atomic `DurableObjectRateLimiter` (`GENERAL_RATE_LIMIT` binding, new — must be provisioned by an actual `wrangler deploy` before it stops failing open).
+21. ✅ **FIXED** 8.6 (medium): idempotency cache now excludes every unauthenticated request, not just the two anonymous share methods.
+22. ✅ **FIXED** 8.7 (low): anonymous `peekShare` now reports `revoked`; share-view page has a dedicated revoked state.
+23. ✅ **FIXED**: `index.ts`'s pre-config `ALLOW_ORIGIN` 503 now uses `responseHeaders()` like every other response (closes the one gap noted in item 12 above).
