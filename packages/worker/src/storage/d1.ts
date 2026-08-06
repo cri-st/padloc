@@ -293,7 +293,10 @@ export class D1Storage implements Storage {
                     error: err,
                 });
             }
-            throw new Err(ErrorCode.SERVER_ERROR, `D1 storage save failed: ${err.message}`, { error: err });
+            throw new Err(ErrorCode.SERVER_ERROR, "Storage operation failed. Please try again.", {
+                report: true,
+                error: err instanceof Error ? err : new Error(String(err)),
+            });
         }
     }
 

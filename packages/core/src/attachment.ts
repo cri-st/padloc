@@ -167,7 +167,14 @@ export class Attachment extends SimpleContainer {
 }
 
 export interface AttachmentStorage {
-    put(a: Attachment): Promise<void>;
+    /**
+     * `ownerAccountId` is optional (backends that don't track ownership,
+     * e.g. S3, can ignore it) -- passed by `Controller.createAttachment`
+     * (core/server.ts) so backends that DO persist an owner column (e.g.
+     * the Worker's R2AttachmentStorage) can record the real uploader
+     * instead of leaving it permanently blank.
+     */
+    put(a: Attachment, ownerAccountId?: string): Promise<void>;
     get(vault: VaultID, id: AttachmentID): Promise<Attachment>;
     delete(vault: VaultID, id: AttachmentID): Promise<void>;
     deleteAll(vault: VaultID): Promise<void>;
@@ -177,7 +184,7 @@ export interface AttachmentStorage {
 export class MemoryAttachmentStorage implements AttachmentStorage {
     private _storage = new Map<string, Attachment>();
 
-    async put(a: Attachment): Promise<void> {
+    async put(a: Attachment, _ownerAccountId?: string): Promise<void> {
         this._storage.set(`${a.vault}_${a.id}`, a);
     }
 

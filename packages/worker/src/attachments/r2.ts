@@ -2,6 +2,16 @@ import { Attachment, AttachmentID, AttachmentStorage } from "@padloc/core/src/at
 import { VaultID } from "@padloc/core/src/vault";
 import { Err, ErrorCode } from "@padloc/core/src/error";
 
+// SECURITY: never surface a raw driver/SDK error message to the HTTP
+// client (D1/R2 errors can contain table/column names, SQLITE_*/R2 error
+// codes, and other internal structure). Callers pass the real detail as
+// `error:` (Err.originalError) so it still reaches operators via
+// `report: true` -> captureHqException, without ever reaching the response
+// body sent back to the caller.
+function toError(value: unknown): Error {
+    return value instanceof Error ? value : new Error(String(value));
+}
+
 export const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024;
 export const SIGNED_URL_THRESHOLD = 5 * 1024 * 1024;
 export const SIGNED_URL_TTL_MS = 15 * 60 * 1000;
@@ -45,7 +55,7 @@ export class R2AttachmentStorage implements AttachmentStorage {
         return this.config.db;
     }
 
-    async put(att: Attachment): Promise<void> {
+    async put(att: Attachment, ownerAccountId?: string): Promise<void> {
         if (att.size > MAX_ATTACHMENT_SIZE) {
             throw new Err(ErrorCode.BAD_REQUEST, `Attachment size ${att.size} exceeds maximum ${MAX_ATTACHMENT_SIZE}`);
         }
@@ -54,12 +64,25 @@ export class R2AttachmentStorage implements AttachmentStorage {
         const bytes = att.toBytes();
         const hashHex = await sha256Hex(bytes);
 
+        // SECURITY: persist the REAL uploaded byte length, not the
+        // client-declared `att.size`. `getUsage()`/quota enforcement in
+        // core/server.ts sums this column, so trusting the declared value
+        // let a client report `size: 1` while uploading up to
+        // MAX_ATTACHMENT_SIZE of real data, silently exhausting R2 storage
+        // without ever tripping the quota check.
+        if (bytes.length > MAX_ATTACHMENT_SIZE) {
+            throw new Err(
+                ErrorCode.BAD_REQUEST,
+                `Attachment size ${bytes.length} exceeds maximum ${MAX_ATTACHMENT_SIZE}`
+            );
+        }
+
         await this.db
             .prepare(
                 `INSERT INTO attachments (id, vault_id, owner_account_id, r2_key, size_bytes, hash, created_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?)`
             )
-            .bind(att.id, att.vault, "", key, att.size, hashHex, new Date().toISOString())
+            .bind(att.id, att.vault, ownerAccountId || "", key, bytes.length, hashHex, new Date().toISOString())
             .run();
 
         try {
@@ -79,14 +102,22 @@ export class R2AttachmentStorage implements AttachmentStorage {
                 } catch (rollbackErr) {
                     if (attempt === 3) {
                         await recordOrphan(this.db, key, "put_rollback_failed");
-                        throw new Err(
-                            ErrorCode.SERVER_ERROR,
-                            `R2 upload failed and D1 rollback failed after 3 attempts: ${r2Err}`
-                        );
+                        // SECURITY: never surface the raw driver error text to
+                        // the HTTP client (it can contain table/column names,
+                        // SQLITE_*/R2 error codes, internal structure). The
+                        // real detail still reaches operators via `report:
+                        // true` + `originalError` -> captureHqException.
+                        throw new Err(ErrorCode.SERVER_ERROR, "Attachment upload failed. Please try again.", {
+                            report: true,
+                            error: toError(r2Err),
+                        });
                     }
                 }
             }
-            throw new Err(ErrorCode.SERVER_ERROR, `R2 upload failed: ${r2Err}`);
+            throw new Err(ErrorCode.SERVER_ERROR, "Attachment upload failed. Please try again.", {
+                report: true,
+                error: toError(r2Err),
+            });
         }
     }
 
@@ -131,14 +162,20 @@ export class R2AttachmentStorage implements AttachmentStorage {
         try {
             await this.bucket.delete(key);
         } catch (r2Err) {
-            throw new Err(ErrorCode.SERVER_ERROR, `R2 delete failed for ${key}: ${r2Err}`);
+            throw new Err(ErrorCode.SERVER_ERROR, "Attachment delete failed. Please try again.", {
+                report: true,
+                error: toError(r2Err),
+            });
         }
 
         try {
             await this.db.prepare(`DELETE FROM attachments WHERE id = ? AND vault_id = ?`).bind(id, vault).run();
         } catch (d1Err) {
             await recordOrphan(this.db, key, "delete_d1_failed");
-            throw new Err(ErrorCode.SERVER_ERROR, `D1 delete failed after R2 delete: ${d1Err}`);
+            throw new Err(ErrorCode.SERVER_ERROR, "Attachment delete failed. Please try again.", {
+                report: true,
+                error: toError(d1Err),
+            });
         }
     }
 
@@ -151,7 +188,10 @@ export class R2AttachmentStorage implements AttachmentStorage {
             try {
                 await Promise.all(keys.map((key) => this.bucket.delete(key)));
             } catch (r2Err) {
-                throw new Err(ErrorCode.SERVER_ERROR, `R2 bulk delete failed for vault ${vault}: ${r2Err}`);
+                throw new Err(ErrorCode.SERVER_ERROR, "Attachment delete failed. Please try again.", {
+                    report: true,
+                    error: toError(r2Err),
+                });
             }
         }
 
@@ -161,7 +201,10 @@ export class R2AttachmentStorage implements AttachmentStorage {
             for (const key of keys) {
                 await recordOrphan(this.db, key, "delete_all_d1_failed");
             }
-            throw new Err(ErrorCode.SERVER_ERROR, `D1 bulk delete failed for vault ${vault}: ${d1Err}`);
+            throw new Err(ErrorCode.SERVER_ERROR, "Attachment delete failed. Please try again.", {
+                report: true,
+                error: toError(d1Err),
+            });
         }
     }
 
@@ -174,6 +217,32 @@ export class R2AttachmentStorage implements AttachmentStorage {
         return result?.total ?? 0;
     }
 
+    // SECURITY: NOT CURRENTLY WIRED UP -- no RPC method in
+    // packages/core/src/server.ts calls createUploadUrl/confirmUpload/
+    // createDownloadUrl/verify today (grep confirms zero callers), so this
+    // signed-URL flow is dead code. Before wiring it to a real endpoint,
+    // close these two KNOWN, UNFIXED gaps (flagged in review, deliberately
+    // left open rather than silently claimed as fixed):
+    //
+    // 1. TTL reuse / stale size_bytes: the presigned PUT URL stays valid
+    //    for SIGNED_URL_TTL_MS (15 min) AFTER confirmUpload() has already
+    //    recorded the (correct, head()-verified) size. Nothing stops the
+    //    client from PUTting a DIFFERENT, LARGER object to the same signed
+    //    URL again before it expires -- R2 accepts the overwrite directly,
+    //    entirely bypassing this Worker, so size_bytes in D1 goes stale
+    //    and understates real usage. This is a structural limitation of
+    //    presigned uploads, not something a single check here can close;
+    //    fixing it needs either a much shorter TTL, a one-time-use token
+    //    scheme, or a periodic reconciliation job that re-heads() stored
+    //    objects and corrects drifted size_bytes.
+    // 2. Unverified hash: confirmUpload() persists the client-declared
+    //    `hash` verbatim -- it is NEVER checked against the real object
+    //    content (unlike `verify()` below, which downloads and hashes the
+    //    whole object, an expense the signed-URL/large-file path exists
+    //    specifically to avoid). A caller can claim any hash for any
+    //    upload; treat `attachments.hash` for signed-URL uploads as
+    //    advisory/client-asserted, not integrity-verified, until this is
+    //    addressed.
     async createUploadUrl(
         vault: VaultID,
         id: AttachmentID,
@@ -199,16 +268,35 @@ export class R2AttachmentStorage implements AttachmentStorage {
     async confirmUpload(
         vault: VaultID,
         id: AttachmentID,
-        size: number,
+        _size: number,
         hash: string,
         ownerAccountId: string,
         _contentType: string
     ): Promise<void> {
-        if (size > MAX_ATTACHMENT_SIZE) {
-            throw new Err(ErrorCode.BAD_REQUEST, `Attachment size ${size} exceeds maximum ${MAX_ATTACHMENT_SIZE}`);
+        const key = r2Key(vault, id);
+
+        // SECURITY: `_size` (like `_contentType`) is 100% client-declared --
+        // the whole point of the signed-URL flow is that the actual bytes
+        // go straight from the client to R2, bypassing this Worker. This
+        // method used to trust it verbatim, which is the EXACT same quota
+        // bypass as the small-file `put()` path had (see the fix there):
+        // a caller could report `size: 1` while a much larger object sits
+        // in R2, defeating `getUsage()`-based quota enforcement. R2's
+        // `head()` returns the REAL, authoritative object size -- persist
+        // THAT, never the client-declared value, and require the object to
+        // actually exist before recording it.
+        const object = await this.bucket.head(key);
+        if (!object) {
+            throw new Err(ErrorCode.NOT_FOUND, "Uploaded object not found. Please retry the upload.");
         }
 
-        const key = r2Key(vault, id);
+        if (object.size > MAX_ATTACHMENT_SIZE) {
+            await this.bucket.delete(key);
+            throw new Err(
+                ErrorCode.BAD_REQUEST,
+                `Attachment size ${object.size} exceeds maximum ${MAX_ATTACHMENT_SIZE}`
+            );
+        }
 
         try {
             await this.db
@@ -216,11 +304,14 @@ export class R2AttachmentStorage implements AttachmentStorage {
                     `INSERT INTO attachments (id, vault_id, owner_account_id, r2_key, size_bytes, hash, created_at)
                      VALUES (?, ?, ?, ?, ?, ?, ?)`
                 )
-                .bind(id, vault, ownerAccountId, key, size, hash, new Date().toISOString())
+                .bind(id, vault, ownerAccountId, key, object.size, hash, new Date().toISOString())
                 .run();
         } catch (d1Err) {
             await recordOrphan(this.db, key, "confirm_d1_failed");
-            throw new Err(ErrorCode.SERVER_ERROR, `D1 confirm failed: ${d1Err}`);
+            throw new Err(ErrorCode.SERVER_ERROR, "Attachment upload confirmation failed. Please try again.", {
+                report: true,
+                error: toError(d1Err),
+            });
         }
     }
 
