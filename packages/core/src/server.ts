@@ -115,6 +115,14 @@ export class ServerConfig extends Config {
     @ConfigParam("string[]")
     admins: string[] = [];
 
+    /**
+     * Maximum allowed time-to-live, in seconds, for a password share link
+     * (see `password-share-links`). Sender-requested TTLs above this MUST
+     * be rejected by `createShare`. Defaults to 14 days.
+     */
+    @ConfigParam("number")
+    shareLinkMaxTtlSeconds = 14 * 24 * 60 * 60;
+
     constructor(init: Partial<ServerConfig> = {}) {
         super();
         Object.assign(this, init);

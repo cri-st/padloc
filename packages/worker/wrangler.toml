@@ -15,6 +15,10 @@ compatibility_date = "2025-04-01"
 tag = "v1"
 new_classes = ["AccountLockDO"]
 
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ShareLinkDO"]
+
 # Top-level D1 migration config (used for local dev). --local mode never
 # contacts a real Cloudflare account, so these IDs are placeholders.
 [[d1_databases]]
@@ -56,6 +60,10 @@ id = "PADLOC_HINTS_DEV"
 name = "ACCOUNT_LOCK"
 class_name = "AccountLockDO"
 
+[[env.dev.durable_objects.bindings]]
+name = "SHARE_LINKS"
+class_name = "ShareLinkDO"
+
 [env.preview]
 name = "padloc-worker-preview"
 
@@ -88,3 +96,6 @@ id = "00000000000000000000000000000002"
 name = "ACCOUNT_LOCK"
 class_name = "AccountLockDO"
 
+[[env.preview.durable_objects.bindings]]
+name = "SHARE_LINKS"
+class_name = "ShareLinkDO"

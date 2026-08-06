@@ -3,6 +3,7 @@ export interface Env {
     ATTACHMENTS?: R2Bucket;
     HINTS?: KVNamespace;
     ACCOUNT_LOCK?: DurableObjectNamespace;
+    SHARE_LINKS?: DurableObjectNamespace;
     ALLOW_ORIGIN?: string;
     CLIENT_URL?: string;
     APP_NAME?: string;
