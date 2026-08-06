@@ -102,14 +102,14 @@ View endpoint MUST enforce per-share-ID and per-IP attempt limits.
 
 ### Requirement: Item-Type Scope
 
-Only Login-type items MUST be shareable in v1; other types MUST be rejected at creation naming the type.
+Only Login-type items MUST be shareable in v1. The client MUST hide the "Share Link" action for non-Login items. This is enforced client-side only — the server never sees plaintext, so it cannot classify an item's type and never receives a create request for a non-Login item in the first place.
 
 #### Scenario: Login item accepted
 - GIVEN sender selects a Login-type item
 - WHEN they create a share
 - THEN server MUST accept and process it
 
-#### Scenario: Non-Login item rejected
-- GIVEN sender selects a non-Login item (e.g. Card, Note)
-- WHEN they attempt to create a share
-- THEN request MUST be rejected before upload, naming the type
+#### Scenario: Non-Login item is not offered
+- GIVEN sender is viewing a non-Login item (e.g. Card, Note)
+- WHEN the item view renders its actions
+- THEN the "Share Link" action MUST be hidden; no share request is ever sent to the server for that item
