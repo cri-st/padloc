@@ -162,6 +162,17 @@ export class LogEntry extends Storable {
 export type ChangeLogAction = "create" | "update" | "delete";
 
 export class ChangeLogEntry<T extends Storable = Storable> extends LogEntry {
+    // BUGFIX: Storable.kind defaults to `this.constructor.name.toLowerCase()`
+    // ("changelogentry"), but D1Storage's TABLES map (and every other
+    // Storage backend's schema) only knows the table name "changelog".
+    // Without this override, EVERY save() of a ChangeLogEntry threw
+    // NOT_FOUND ("unknown table for kind") -- silently, since callers never
+    // await/catch these writes (see ChangeLoggingStorage below) -- so the
+    // audit trail has been permanently empty despite being enabled by
+    // default, for every account/vault/org/attachment create/update/delete.
+    get kind() {
+        return "changelog";
+    }
     get objectKind() {
         return this.before?.kind || this.after!.kind;
     }
@@ -213,7 +224,13 @@ export class ChangeLoggingStorage implements Storage {
 
         const action = before ? "update" : "create";
 
-        this._changeLogStorage.save(new ChangeLogEntry(this._context, action, before, obj));
+        this._changeLogStorage.save(new ChangeLogEntry(this._context, action, before, obj)).catch((err) => {
+            // Fire-and-forget by design (callers never await this write),
+            // but it must not vanish as a silent/unhandled rejection --
+            // that's exactly how the changelog/requestlog kind mismatch
+            // above went unnoticed for so long.
+            console.error("Failed to write change log entry", err);
+        });
     }
 
     async get<T extends Storable>(cls: StorableConstructor<T> | T, id: string): Promise<T> {
@@ -225,7 +242,9 @@ export class ChangeLoggingStorage implements Storage {
         if (!this._config.enabled || this._config.excludeKinds.includes(obj.kind)) {
             return;
         }
-        this._changeLogStorage.save(new ChangeLogEntry(this._context, "delete", obj));
+        this._changeLogStorage.save(new ChangeLogEntry(this._context, "delete", obj)).catch((err) => {
+            console.error("Failed to write change log entry", err);
+        });
     }
 
     async clear() {
@@ -258,6 +277,13 @@ export class ChangeLogger {
 }
 
 export class RequestLogEntry extends LogEntry {
+    // BUGFIX: same class of bug as ChangeLogEntry.kind above -- the
+    // default `this.constructor.name.toLowerCase()` ("requestlogentry")
+    // doesn't match the "requestlog" table name, so every request-log
+    // write silently failed.
+    get kind() {
+        return "requestlog";
+    }
     @AsSerializable(Request)
     request: Request;
 
@@ -298,6 +324,12 @@ export class RequestLogger {
         ) {
             return;
         }
-        return this._storage.save(new RequestLogEntry(request, responseTime, context));
+        try {
+            await this._storage.save(new RequestLogEntry(request, responseTime, context));
+        } catch (err) {
+            // Caller (Server.handle()) never awaits this either -- report
+            // instead of letting it become a silent/unhandled rejection.
+            console.error("Failed to write request log entry", err);
+        }
     }
 }
