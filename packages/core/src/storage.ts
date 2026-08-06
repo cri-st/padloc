@@ -45,6 +45,28 @@ export interface StorageListOptions {
     orderByDirection?: "asc" | "desc";
 }
 
+// SECURITY: `query.value` (the regex pattern) is client-controlled and
+// reachable via the admin-gated listAccounts/listOrgs API with the
+// in-memory/LevelDB storage backend. `new RegExp(...)` has no built-in
+// execution timeout in V8, so a catastrophic-backtracking pattern (e.g.
+// `(a+)+$`) evaluated against the dataset can hang the single-threaded
+// event loop for every request/user on this process. Not exhaustive (V8
+// still has no real timeout mechanism), but a length cap plus rejecting
+// the textbook "quantified group containing a quantified sub-expression"
+// shape blocks the common cases without touching normal filters (email
+// prefixes, domain suffixes, etc.).
+const MAX_REGEX_QUERY_PATTERN_LENGTH = 200;
+const UNSAFE_REGEX_SHAPE = /\([^()]*[+*][^()]*\)[+*]/;
+
+function assertSafeRegexPattern(pattern: unknown): asserts pattern is string {
+    if (typeof pattern !== "string" || pattern.length > MAX_REGEX_QUERY_PATTERN_LENGTH) {
+        throw new Err(ErrorCode.BAD_REQUEST, "Regex query pattern is invalid or too long.");
+    }
+    if (UNSAFE_REGEX_SHAPE.test(pattern)) {
+        throw new Err(ErrorCode.BAD_REQUEST, "Regex query pattern rejected (potentially unsafe).");
+    }
+}
+
 export function filterByQuery<T>(obj: T, query: StorageQuery): boolean {
     switch (query.op) {
         case "and":
@@ -54,8 +76,10 @@ export function filterByQuery<T>(obj: T, query: StorageQuery): boolean {
         case "not":
             return !filterByQuery(obj, query.query);
         case "regex":
+            assertSafeRegexPattern(query.value);
             return new RegExp(query.value).test(getPath(obj, query.path));
         case "negex":
+            assertSafeRegexPattern(query.value);
             return !new RegExp(query.value).test(getPath(obj, query.path));
         case "gt":
             return query.value ? getPath(obj, query.path) > query.value : false;

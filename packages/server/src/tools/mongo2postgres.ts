@@ -40,9 +40,13 @@ function getPostgresPool(config: PostgresConfig) {
 
 async function main() {
     const config = getConfig();
+    // SECURITY: log the redacted `.toRaw()` form, never the raw Config
+    // objects directly -- those contain `password` in plaintext, and
+    // `secret: true` ConfigParams (see packages/core/src/config.ts) are
+    // only redacted by `.toRaw()`, not by logging the instance itself.
     console.log("migrating data from mongodb to postgres. config: ", {
-        mongodb: config.data.mongodb,
-        postgres: config.data.postgres,
+        mongodb: config.data.mongodb?.toRaw(),
+        postgres: config.data.postgres?.toRaw(),
     });
     const mongoClient = getMongoClient(config.data.mongodb!);
     await mongoClient.connect();

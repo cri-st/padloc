@@ -31,6 +31,33 @@ export class MongoDBStorageConfig extends Config {
     maxDocuments?: number;
 }
 
+// SECURITY: `query.op`/`query.path` come from client-controlled `StorageQuery`
+// (via listAccounts/listOrgs, admin-gated but untrusted input). The previous
+// `default` branch built `{[query.path]: {[\`$${query.op}\`]: query.value}}`
+// from the raw, unvalidated `op` string, letting a caller inject ANY Mongo
+// query operator (`$where`, `$expr`, ...) far beyond the six ops this
+// builder is meant to support. `op` is now restricted to an explicit
+// allowlist before it is ever used to build a `$`-prefixed key.
+const ALLOWED_OPERATORS = new Set(["eq", "ne", "gt", "lt", "gte", "lte"]);
+
+// SECURITY: same class of issue as packages/core/src/storage.ts's
+// filterByQuery -- `query.value` here becomes a MongoDB `$regex`, and
+// while MongoDB's own regex engine has some internal safeguards, an
+// unbounded/catastrophic-backtracking-shaped pattern from an admin-gated
+// but still client-controlled query is unnecessary risk. Same length cap
+// + nested-quantifier heuristic as the core filter.
+const MAX_REGEX_QUERY_PATTERN_LENGTH = 200;
+const UNSAFE_REGEX_SHAPE = /\([^()]*[+*][^()]*\)[+*]/;
+
+function assertSafeRegexPattern(pattern: unknown): asserts pattern is string {
+    if (typeof pattern !== "string" || pattern.length > MAX_REGEX_QUERY_PATTERN_LENGTH) {
+        throw new Err(ErrorCode.BAD_REQUEST, "Regex query pattern is invalid or too long.");
+    }
+    if (UNSAFE_REGEX_SHAPE.test(pattern)) {
+        throw new Err(ErrorCode.BAD_REQUEST, "Regex query pattern rejected (potentially unsafe).");
+    }
+}
+
 function queryToMongoFilter(query: StorageQuery): Filter<any> {
     switch (query.op) {
         case "and":
@@ -40,6 +67,7 @@ function queryToMongoFilter(query: StorageQuery): Filter<any> {
         case "not":
             return { $nor: [queryToMongoFilter(query.query)] };
         case "regex":
+            assertSafeRegexPattern(query.value);
             return {
                 [query.path]: {
                     $regex: query.value,
@@ -47,6 +75,7 @@ function queryToMongoFilter(query: StorageQuery): Filter<any> {
                 },
             };
         case "negex":
+            assertSafeRegexPattern(query.value);
             return {
                 [query.path]: {
                     $not: {
@@ -61,6 +90,9 @@ function queryToMongoFilter(query: StorageQuery): Filter<any> {
                 [query.path]: query.value,
             };
         default:
+            if (!ALLOWED_OPERATORS.has(query.op)) {
+                throw new Err(ErrorCode.BAD_REQUEST, `Unsupported query operator: ${JSON.stringify(query.op)}`);
+            }
             return {
                 [query.path]: {
                     [`$${query.op}`]: query.value,
@@ -80,12 +112,13 @@ export class MongoDBStorage implements Storage {
         this.config = config;
         let { username, password, host, port, protocol = "mongodb", authDatabase, tls, tlsCAFile } = config;
         tlsCAFile = tlsCAFile && path.resolve(process.cwd(), tlsCAFile);
+        // SECURITY: never log `password` (or the full config, which
+        // contains it) in plaintext -- this used to be printed to
+        // stdout/container logs on every startup.
         console.log(
-            `${protocol}://${host}${authDatabase ? `/${authDatabase}` : ""}${port ? `:${port}` : ""}`,
-            username,
-            password,
-            tls,
-            tlsCAFile
+            `Connecting to MongoDB at ${protocol}://${host}${authDatabase ? `/${authDatabase}` : ""}${
+                port ? `:${port}` : ""
+            } (user: ${username || "<none>"}, tls: ${!!tls})`
         );
         this._client = new MongoClient(
             `${protocol}://${host}${authDatabase ? `/${authDatabase}` : ""}${port ? `:${port}` : ""}`,
@@ -194,8 +227,6 @@ export class MongoDBStorage implements Storage {
                 [orderBy]: orderByDirection === "desc" ? -1 : 1,
             };
         }
-
-        console.log(JSON.stringify(filter, null, 4), options);
 
         const rows = await collection.find(filter, options).toArray();
 
