@@ -1,0 +1,79 @@
+schema: spec-driven
+
+context: |
+  Tech stack: TypeScript 4.4.3 (root), Node 24.x/npm 11.x, Lerna 5.1.8 monorepo
+  (packages/*, no npm "workspaces" field — Lerna drives cross-package installs).
+  Architecture: Cloudflare Worker API (packages/worker, D1/R2/KV/DO, Hono-less
+  custom server-factory) + static PWA (packages/pwa, Lit-based packages/app) +
+  Cordova/Electron/Tauri native shells + shared core (packages/core) + browser
+  extension (packages/extension, Playwright-tested) + admin UI + locale pkg.
+  Testing: Mocha+Chai (app/server/extension unit), custom Node e2e scripts
+  against `wrangler dev` (packages/worker/test/*.mjs), Cypress (root E2E),
+  Playwright (extension harness). No coverage tool detected.
+  Style: Prettier (4-space, 120 col, double quotes); no ESLint configured.
+
+strict_tdd: true
+
+testing:
+  test_runner:
+    command: "npm run test:changed -- --since <ref>"
+    fallback_command: "npm test"
+    framework: "Mocha + Chai (unit); custom Node scripts + wrangler dev (worker integration); Cypress (E2E); Playwright (extension)"
+    notes: >
+      `npm run test:changed` wraps an external `ch5 plan padloc` planner
+      (scripts/test-changed.sh) that defaults CH5_ROOT to a path on a
+      different machine (/Users/hassoncs/src/ch5) — treat as unavailable
+      unless CH5_ROOT/ch5 CLI is confirmed present locally. `npm test` (root)
+      runs `lerna run test`, which only fires in packages/{server,extension,worker}
+      (the only workspaces with a `test` script).
+  layers:
+    unit:
+      available: true
+      tool: "Mocha + Chai (packages/app, packages/server, packages/extension)"
+    integration:
+      available: true
+      tool: "Node scripts against `wrangler dev --local` (packages/worker/test/*.mjs: session-contract, vault-crud, account-lockout, crypto-parity, transport-roundtrip, logging-redaction)"
+    e2e:
+      available: true
+      tool: "Cypress (root `npm run test:e2e`, cypress.config.ts); Playwright (packages/extension test:harness / test:passkey-broker)"
+  coverage:
+    available: false
+    command: ""
+  quality:
+    linter:
+      available: false
+      command: ""
+    type_checker:
+      available: true
+      command: "tsc --noEmit (root tsconfig.json; also per-package, e.g. `npm run test` in packages/server runs `tsc --noEmit` first)"
+    formatter:
+      available: true
+      command: "npm run prettier:check (root) / npm run prettier:check:changed"
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes (this repo forbids PRs — see apply rules)
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+    - Cross-check any hostname/URL/app-name claim against config/environment-targets.json instead of assuming literals (see AGENTS.md Hosting)
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing code patterns (Lit components in packages/app, Drizzle ORM in packages/worker)
+      - Do not create pull requests for this repo — push to a topic branch, require exact-SHA CI, then fast-forward to main (AGENTS.md Rules)
+      - Do not create .env/.dev.vars/plaintext secret files; Cloudflare-side vars/secrets are authoritative
+      - Do not reintroduce process.env.PL_APP_NAME assumptions in Worker/runtime-shared code
+    tdd: true
+    test_command: "npm run test:changed -- --since <ref>"
+  verify:
+    test_command: "npm run test:changed -- --since <ref>"
+    build_command: "npm run runtime-config:check"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
