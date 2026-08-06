@@ -460,7 +460,7 @@ export class ExtensionApp extends App {
                         <span class="save-prompt-title">${isUpdate ? "Update Login?" : "Save Login?"}</span>
                     </div>
                     <div class="save-prompt-body">
-                        <div class="save-prompt-host">${hostname}</div>
+                        <div class="save-prompt-host">${this._escapeHtml(hostname)}</div>
                         <div class="save-prompt-username">
                             <span class="save-prompt-label">Username</span>
                             <span class="save-prompt-value">${this._escapeHtml(prompt.username) || "(empty)"}</span>

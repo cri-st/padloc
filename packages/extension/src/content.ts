@@ -432,6 +432,27 @@ class ExtensionContent {
      * to avoid duplicate prompts after navigation.
      */
     private _listenForFormSubmit() {
+        // SECURITY: the content script runs in every frame of the page
+        // (manifest.json's all_frames:true, needed for legitimate
+        // same-site iframe login forms). Without this guard, ANY
+        // embedded iframe on ANY page -- including a third-party ad/
+        // tracker iframe with no relationship to the top-level site --
+        // could programmatically create and submit a hidden password
+        // form to repeatedly trigger the "Save password?" prompt (UI
+        // annoyance / fingerprinting whether Padloc is installed).
+        // Restrict capture to the top-level frame, or a frame same-origin
+        // with it (legitimate same-site embedded login forms); a
+        // genuinely cross-origin frame throws accessing `window.top`'s
+        // location, which is exactly the case to block.
+        if (window.top !== window) {
+            try {
+                if (window.top?.location.origin !== window.location.origin) {
+                    return;
+                }
+            } catch {
+                return;
+            }
+        }
         const submittedUrls = new Set<string>();
 
         const findPasswordInputs = (root: Document | ShadowRoot): HTMLInputElement[] => {

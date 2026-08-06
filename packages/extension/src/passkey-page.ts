@@ -132,6 +132,17 @@ async function requestFromExtension(
             );
         };
         const onResult = (event: MessageEvent) => {
+            // SECURITY: matches the check already done by the sibling
+            // ISOLATED-world bridge (passkey-content-bridge.ts's
+            // `event.source !== target`). Without it, any code able to
+            // `postMessage` into this top-level window (e.g. a same-page
+            // iframe, even cross-origin -- postMessage delivery is always
+            // cross-origin-permitted) could inject a forged WebAuthn
+            // result into the promise resolving the page's
+            // navigator.credentials.create()/get() call.
+            if (event.source !== window) {
+                return;
+            }
             if (event.data?.source !== PASSKEY_EXTENSION_MESSAGE_SOURCE || event.data?.kind !== "result") {
                 return;
             }

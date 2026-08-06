@@ -36,7 +36,6 @@
     "permissions": [
         "storage",
         "unlimitedStorage",
-        "tabs",
         "activeTab",
         "contextMenus",
         "alarms",
