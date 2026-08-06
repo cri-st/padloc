@@ -2,6 +2,8 @@ import { Auth, Authenticator, AuthenticatorStatus, AuthRequest, AuthServer, Auth
 import { Messenger, EmailAuthMessage } from "../messenger";
 import { ErrorCode, Err } from "../error";
 import { randomNumber } from "../util";
+import { getCryptoProvider } from "../platform";
+import { stringToBytes } from "../encoding";
 
 export class EmailAuthServer implements AuthServer {
     constructor(public messenger: Messenger) {}
@@ -34,7 +36,19 @@ export class EmailAuthServer implements AuthServer {
     }
 
     async activateAuthenticator(authenticator: Authenticator, { code: activationCode }: { code: string }) {
-        if (activationCode !== authenticator.state.activationCode) {
+        // SECURITY: timing-safe, matching the pattern already used for
+        // TOTP/HOTP (otp.ts's validateHotp) and SRP's M1 -- a plain `!==`
+        // over a 6-digit (10^6) space is a real, if narrow, response-time
+        // side channel that the rest of the codebase deliberately avoids
+        // for equivalent secrets.
+        const verified =
+            !!authenticator.state.activationCode &&
+            !!activationCode &&
+            (await getCryptoProvider().timingSafeEqual(
+                stringToBytes(authenticator.state.activationCode),
+                stringToBytes(activationCode)
+            ));
+        if (!verified) {
             throw new Err(
                 ErrorCode.AUTHENTICATION_FAILED,
                 "Failed to activate authenticator. Incorrect activation code!"
@@ -72,7 +86,10 @@ export class EmailAuthServer implements AuthServer {
         const verified =
             !!request.state.verificationCode &&
             !!verificationCode &&
-            request.state.verificationCode === verificationCode;
+            (await getCryptoProvider().timingSafeEqual(
+                stringToBytes(request.state.verificationCode),
+                stringToBytes(verificationCode)
+            ));
         if (!verified) {
             throw new Err(ErrorCode.AUTHENTICATION_FAILED, "Incorrect verification code.");
         }

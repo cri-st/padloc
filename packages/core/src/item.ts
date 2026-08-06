@@ -146,7 +146,26 @@ export const FIELD_DEFS: { [t in FieldType]: FieldDef } = {
             {
                 icon: "web",
                 label: $l("Open"),
-                action: (value: string) => openExternalUrl(value.startsWith("http") ? value : `https://${value}`),
+                action: (value: string) => {
+                    // SECURITY: `value.startsWith("http")` is a prefix
+                    // check, not a scheme check -- it accepts any string
+                    // starting with the literal letters "http" (not just
+                    // "http://"/"https://"). Parse with `new URL()` and
+                    // explicitly allowlist the protocol instead, so a
+                    // value that doesn't parse as http(s) always gets the
+                    // `https://` prefix treatment rather than being passed
+                    // through as-is.
+                    let url: URL;
+                    try {
+                        url = new URL(value);
+                    } catch {
+                        url = new URL(`https://${value}`);
+                    }
+                    if (url.protocol !== "http:" && url.protocol !== "https:") {
+                        url = new URL(`https://${value}`);
+                    }
+                    openExternalUrl(url.href);
+                },
             },
         ],
     },

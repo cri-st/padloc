@@ -221,8 +221,17 @@ export class Invite extends SimpleContainer {
         this.id = await uuid();
         this.invitedBy = { accountId: invitor.id, email: invitor.email, name: invitor.name };
 
-        // Generate secret
-        this.secret = bytesToHex(await getProvider().randomBytes(4));
+        // Generate secret. SECURITY: previously only 4 bytes (32 bits) --
+        // a low margin for a value whose specific purpose is to let the
+        // org owner and invitee mutually verify each other's public key
+        // out-of-band against a MALICIOUS/COMPROMISED SERVER attempting a
+        // MITM key-substitution (verifyOrg/verifyInvitee below). Doubled
+        // to 8 bytes (64 bits / 16 hex chars): still practical to read
+        // aloud/type manually (the secret is deliberately excluded from
+        // the emailed invite link in server.ts, precisely so it must
+        // travel over a real out-of-band channel), while meaningfully
+        // raising the bar over the previous 32-bit value.
+        this.secret = bytesToHex(await getProvider().randomBytes(8));
         // Set expiration time (12 hours from now)
         this.expires = new Date(Date.now() + 1000 * 60 * 60 * duration);
 
