@@ -117,9 +117,15 @@ export class ServerConfig extends Config {
     admins: string[] = [];
 
     /**
-     * Maximum allowed time-to-live, in seconds, for a password share link
-     * (see `password-share-links`). Sender-requested TTLs above this MUST
-     * be rejected by `createShare`. Defaults to 14 days.
+     * Maximum allowed time-to-live, in seconds, for a one-time password
+     * share link created via `createShare` (see the `share-password`
+     * openspec change). Sender-requested `CreateShareParams.ttlSeconds`
+     * values above this MUST be rejected (`_validateShareTtl`). Defaults
+     * to 14 days. Only takes effect on deployments that also configure a
+     * `ShareStorage` (see the `shareStorage` getter below) -- worker
+     * deployments provide one via the `SHARE_LINKS` Durable Object
+     * binding (`packages/worker/wrangler.toml`), wired through
+     * `DurableObjectShareStorage`.
      */
     @ConfigParam("number")
     shareLinkMaxTtlSeconds = 14 * 24 * 60 * 60;
@@ -193,6 +199,15 @@ export class Controller extends API {
         return this.server.attachmentStorage;
     }
 
+    /**
+     * Password share link storage, proxied from `Server.shareStorage`.
+     * `undefined` unless the hosting deployment injected one into the
+     * `Server` constructor -- on the Cloudflare Worker this happens only
+     * when the `SHARE_LINKS` Durable Object binding is configured
+     * (`server-factory.ts`). `_requireShareStorage()` throws
+     * `NOT_SUPPORTED` for `createShare`/`peekShare`/etc. when this is
+     * unset, so sharing is safely a no-op on deployments without it.
+     */
     get shareStorage() {
         return this.server.shareStorage;
     }

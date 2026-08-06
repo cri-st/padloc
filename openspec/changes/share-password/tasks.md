@@ -56,9 +56,9 @@ Chain strategy: size-exception
 
 ## Phase 6: Testing - Integration & E2E
 
-- [ ] 6.1 Integration test: create->peek->reveal->already-viewed vs `wrangler dev --local`; verify GET load never burns view. (Req: Reveal, Lifecycle, Page load)
-- [ ] 6.2 Manual/Playwright E2E: create->copy->anon->reveal once->2nd fails. (Success Criteria)
+- [x] 6.1 Integration test: create->peek->reveal->already-viewed vs `wrangler dev --local`; verify GET load never burns view. (Req: Reveal, Lifecycle, Page load)
+- [x] 6.2 Manual/Playwright E2E: create->copy->anon->reveal once->2nd fails. (Success Criteria)
 
 ## Phase 7: Cleanup
 
-- [ ] 7.1 Update docs/comments for new `ServerConfig`/`SHARE_LINKS` config; remove temporary debug logging added while developing `ShareLinkDO`.
+- [x] 7.1 Update docs/comments for new `ServerConfig`/`SHARE_LINKS` config; remove temporary debug logging added while developing `ShareLinkDO`.
