@@ -31,9 +31,13 @@ import { Request as PlRequest, Response as PlResponse } from "@padloc/core/src/t
 import { CreateAccountParams, StartCreateSessionParams, CompleteCreateSessionParams } from "@padloc/core/src/api";
 import { marshal, unmarshal } from "@padloc/core/src/encoding";
 import { AccountLockDO } from "../src/locks/account-lock";
+import { ShareLinkDO } from "../src/durable-objects/share-link";
 import { Env } from "../src/env";
 
-export { AccountLockDO };
+// ShareLinkDO must be exported once ANY DO class is exported here -- wrangler
+// hard-fails startup for every configured DO binding whose class isn't also
+// exported the moment a worker script exports at least one DO class.
+export { AccountLockDO, ShareLinkDO };
 
 let testEnv: Env;
 

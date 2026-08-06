@@ -12,6 +12,7 @@
     },
     "devDependencies": {
         "drizzle-kit": "^0.30.0",
+        "esbuild": "0.27.0",
         "wrangler": "4.59.2"
     },
     "overrides": {
@@ -34,9 +35,10 @@
         "test:session-contract": "node test/session-contract.test.mjs",
         "test:transport-roundtrip": "node test/run-transport-roundtrip.mjs",
         "test:vault-crud": "node test/run-vault-crud-e2e.mjs",
+        "test:share-link-do": "node test/share-link-do.test.mjs",
         "test:account-lockout-e2e": "node test/run-account-lockout-e2e.mjs",
         "test:error-semantics": "node test/run-error-semantics.mjs",
-        "test:ci": "npm run test:logging-redaction && npm run test:session-contract && npm run test:crypto-parity && npm run test:transport-roundtrip && npm run test:vault-crud && npm run test:account-lockout-e2e",
+        "test:ci": "npm run test:logging-redaction && npm run test:session-contract && npm run test:crypto-parity && npm run test:transport-roundtrip && npm run test:vault-crud && npm run test:account-lockout-e2e && npm run test:share-link-do",
         "test:crypto-parity": "node test/run-crypto-parity-worker.mjs --local",
         "test:crypto-parity:remote": "node test/run-crypto-parity-worker.mjs --remote",
         "dev:crypto-parity": "wrangler dev test/crypto-parity.worker.ts --local --ip 127.0.0.1 --port 18787",
