@@ -11,6 +11,8 @@ import { ErrorCode } from "@padloc/core/src/error";
 import { Config, ConfigParam } from "@padloc/core/src/config";
 import { createServer, IncomingMessage, ServerResponse } from "http";
 import { readBody } from "../transport/http";
+import { getCryptoProvider } from "@padloc/core/src/platform";
+import { stringToBytes } from "@padloc/core/src/encoding";
 import { AccountID } from "@padloc/core/src/account";
 
 export class DefaultAccountQuota extends Config implements AccountQuota {
@@ -313,15 +315,34 @@ export class ApiProvisioner extends BasicProvisioner {
     }
 
     protected async _handleRequest(httpReq: IncomingMessage, httpRes: ServerResponse) {
-        if (this.config.apiKey) {
-            let authHeader = httpReq.headers["authorization"];
-            authHeader = Array.isArray(authHeader) ? authHeader[0] : authHeader;
-            const apiKeyMatch = authHeader?.match(/^Bearer (.+)$/);
-            if (!apiKeyMatch || apiKeyMatch[1] !== this.config.apiKey) {
-                httpRes.statusCode = 401;
-                httpRes.end();
-                return;
-            }
+        // SECURITY: previously (a) auth was skipped ENTIRELY if `apiKey`
+        // wasn't configured -- an insecure-by-default open door for this
+        // provisioner's POST (arbitrarily set any account's
+        // status/statusLabel/actionUrl/metaData by email) and GET (dump
+        // any account's provisioning status by email) endpoints -- and (b)
+        // the comparison was a plain `!==`, not constant-time, unlike
+        // every other secret-token check in this codebase (SCIM,
+        // WebAuthn). Both fixed: fail closed when unconfigured, and use
+        // `timingSafeEqual` like scim.ts does.
+        if (!this.config.apiKey) {
+            httpRes.statusCode = 401;
+            httpRes.end();
+            return;
+        }
+        let authHeader = httpReq.headers["authorization"];
+        authHeader = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+        const apiKeyMatch = authHeader?.match(/^Bearer (.+)$/);
+        const providedKey = apiKeyMatch?.[1];
+        const authorized =
+            !!providedKey &&
+            (await getCryptoProvider().timingSafeEqual(
+                stringToBytes(this.config.apiKey),
+                stringToBytes(providedKey)
+            ));
+        if (!authorized) {
+            httpRes.statusCode = 401;
+            httpRes.end();
+            return;
         }
 
         switch (httpReq.method) {

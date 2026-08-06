@@ -1462,15 +1462,24 @@ export class StripeProvisioner extends BasicProvisioner {
 
         try {
             const body = await readBody(httpReq);
-            if (this.config.webhookSecret) {
-                event = this._stripe.webhooks.constructEvent(
-                    body,
-                    httpReq.headers["stripe-signature"] as string,
-                    this.config.webhookSecret
+            // SECURITY: never trust an unsigned webhook body. The previous
+            // `else { event = JSON.parse(body) }` fallback (when
+            // `webhookSecret` isn't configured) let ANYONE POST a forged
+            // event to this public endpoint and have it processed as a
+            // genuine Stripe notification -- fail closed instead.
+            if (!this.config.webhookSecret) {
+                httpRes.statusCode = 500;
+                httpRes.end();
+                console.error(
+                    "Stripe webhookSecret is not configured -- refusing to process an unsigned webhook event."
                 );
-            } else {
-                event = JSON.parse(body);
+                return;
             }
+            event = this._stripe.webhooks.constructEvent(
+                body,
+                httpReq.headers["stripe-signature"] as string,
+                this.config.webhookSecret
+            );
         } catch (e) {
             httpRes.statusCode = 400;
             httpRes.end();
@@ -1503,6 +1512,33 @@ export class StripeProvisioner extends BasicProvisioner {
     }
 
     protected async _handleSyncBilling(httpReq: IncomingMessage, httpRes: ServerResponse) {
+        // SECURITY: this endpoint used to accept ANY {email, accountId}
+        // from an unauthenticated caller and would CREATE a persistent
+        // AccountProvisioning record (and a real Stripe Customer) for that
+        // email if none existed -- since this HTTP server must be
+        // internet-reachable for Stripe's own webhooks to arrive, `/sync`
+        // was reachable by anyone too. Reuse `portalSecret` (already an
+        // auto-generated, server-only HMAC key with no other public
+        // exposure) as a bearer shared-secret gate.
+        const authHeader = httpReq.headers["authorization"];
+        const providedSecret = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : undefined;
+        let authorized = false;
+        try {
+            authorized =
+                !!providedSecret &&
+                (await getCryptoProvider().timingSafeEqual(
+                    base64ToBytes(this.config.portalSecret),
+                    base64ToBytes(providedSecret)
+                ));
+        } catch (e) {
+            authorized = false;
+        }
+        if (!authorized) {
+            httpRes.statusCode = 401;
+            httpRes.end();
+            return;
+        }
+
         let params: { email: string; accountId?: string };
         try {
             const body = await readBody(httpReq);
