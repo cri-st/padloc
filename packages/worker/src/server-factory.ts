@@ -18,6 +18,7 @@ import { setAppNameOverride } from "@padloc/core/src/branding";
 import { D1Storage } from "./storage/d1";
 import { PersonalProvisioner } from "./provisioner/personal";
 import { R2AttachmentStorage } from "./attachments/r2";
+import { DurableObjectShareStorage } from "./storage/share-do-storage";
 import { ResendMessenger, MockMessenger } from "./email/resend";
 import { WorkerPlatform } from "./platform";
 import { Env } from "./env";
@@ -30,6 +31,7 @@ export function createServer(env: Env): Server {
     const logger: Logger = new VoidLogger();
     const messenger: Messenger = createMessenger(env);
     const attachmentStorage: AttachmentStorage = createAttachmentStorage(env);
+    const shareStorage = env.SHARE_LINKS ? new DurableObjectShareStorage(env.SHARE_LINKS) : undefined;
     const changeLoggerConfig = new ChangeLoggerConfig();
     changeLoggerConfig.enabled = true;
     const requestLoggerConfig = new RequestLoggerConfig();
@@ -79,7 +81,9 @@ export function createServer(env: Env): Server {
         attachmentStorage,
         new PersonalProvisioner(storage),
         changeLogger,
-        requestLogger
+        requestLogger,
+        undefined, // legacyServer -- not supported in the worker runtime
+        shareStorage
     );
 }
 

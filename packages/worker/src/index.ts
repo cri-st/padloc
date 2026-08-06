@@ -1,9 +1,11 @@
 import { Request as PlRequest, Response as PlResponse } from "@padloc/core/src/transport";
+import { ErrorCode } from "@padloc/core/src/error";
 import { WorkerReceiver, WorkerReceiverConfig } from "./transport";
 import { IdempotencyStore } from "./idempotency";
 import { Env } from "./env";
 import { createServer } from "./server-factory";
 import { AccountLockDO } from "./locks/account-lock";
+import { ShareLinkDO } from "./durable-objects/share-link";
 import { Server } from "@padloc/core/src/server";
 import { responseHeaders } from "./observability/security-headers";
 import { RateLimiter } from "./rate-limiter";
@@ -57,7 +59,44 @@ async function healthcheck(env: Env): Promise<HealthcheckStatus> {
     return health;
 }
 
-export { AccountLockDO };
+export { AccountLockDO, ShareLinkDO };
+
+/** RPC methods gated by the share-view rate limiter (anonymous, brute-forceable). */
+const SHARE_VIEW_METHODS = new Set(["peekShare", "revealShare"]);
+
+/**
+ * Derives the rate-limit identities for an anonymous share-view request --
+ * both an IP-scoped key (blocks enumeration across many share ids from one
+ * origin) and a share-scoped key (blocks brute-forcing one share id from
+ * many origins). Returns `null` for any other RPC method, meaning no
+ * share-view limit applies.
+ */
+export function shareViewRateLimitKeys(method: string, params: unknown[] | undefined, ip: string): string[] | null {
+    if (!SHARE_VIEW_METHODS.has(method)) {
+        return null;
+    }
+    const shareId = typeof params?.[0] === "string" ? params[0] : "unknown";
+    return [`share-view:ip:${ip}`, `share-view:share:${shareId}`];
+}
+
+/**
+ * Checks the share-view rate limiter for a request. Returns `true` when the
+ * request is allowed (including every request whose method isn't
+ * `peekShare`/`revealShare`, which this limiter doesn't apply to).
+ */
+export async function checkShareViewRateLimit(
+    method: string,
+    params: unknown[] | undefined,
+    ip: string,
+    limiter: RateLimiter
+): Promise<boolean> {
+    const keys = shareViewRateLimitKeys(method, params, ip);
+    if (!keys) {
+        return true;
+    }
+    const results = await Promise.all(keys.map((key) => limiter.check(key)));
+    return results.every((result) => result.allowed);
+}
 
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -81,6 +120,10 @@ export default {
             maxRequests: Number(env.RATE_LIMIT_MAX_REQUESTS || 100),
             windowMs: Number(env.RATE_LIMIT_WINDOW_MS || 60000),
         });
+        // Conservative fixed default (design.md open question: "10/min/IP, tune
+        // post-launch") -- no dedicated Env surface yet, unlike the generic
+        // limiter above, to keep this batch's worker/env.ts untouched.
+        const shareViewRateLimiter = new RateLimiter(env.HINTS, { maxRequests: 10, windowMs: 60_000 });
         const receiver = new WorkerReceiver(config);
 
         const url = new URL(request.url);
@@ -118,6 +161,24 @@ export default {
                 return await receiver.handleFetch(
                     request,
                     async (req: PlRequest): Promise<PlResponse> => {
+                        const ip =
+                            request.headers.get("cf-connecting-ip") ||
+                            request.headers.get("x-forwarded-for") ||
+                            "anonymous";
+                        const shareViewAllowed = await checkShareViewRateLimit(
+                            req.method,
+                            req.params,
+                            ip,
+                            shareViewRateLimiter
+                        );
+                        if (!shareViewAllowed) {
+                            const res = new PlResponse();
+                            res.error = {
+                                code: ErrorCode.BAD_REQUEST,
+                                message: "Too many requests. Please try again later.",
+                            };
+                            return res;
+                        }
                         return withHqSpan(
                             "padloc.worker.core_request",
                             {
