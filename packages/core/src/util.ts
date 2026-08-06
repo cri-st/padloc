@@ -236,8 +236,22 @@ export function getPath(obj: any, path: string): any {
     return sub && rest.length ? getPath(sub, rest.join(".")) : sub;
 }
 
+// SECURITY: `setPath` is used by SCIM PATCH handling (packages/server/src/
+// scim.ts) with a `path` that comes directly from the client-controlled
+// request body. Without this guard, a path like "__proto__.x" (or
+// "constructor.prototype.x") writes onto `Object.prototype`, polluting the
+// prototype of every plain object in the ENTIRE process for as long as it
+// runs -- a single authenticated (or even just SCIM-token-holding) caller
+// can corrupt behavior for all tenants sharing that process.
+const FORBIDDEN_PATH_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
+
 export function setPath(obj: any, path: string, value: any) {
     const [firstProperty, ...otherProperties] = path.split(".");
+
+    if (FORBIDDEN_PATH_SEGMENTS.has(firstProperty)) {
+        return;
+    }
+
     let subObject = obj[firstProperty];
 
     if (otherProperties.length) {

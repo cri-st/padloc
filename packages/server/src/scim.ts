@@ -180,9 +180,6 @@ export class ScimServer implements DirectoryProvider {
     }
 
     private _validateScimUser(user: ScimUser) {
-        // TODO: Remove this
-        console.log(JSON.stringify({ user }, null, 2));
-
         if (!this._getScimUserEmail(user)) {
             return "User must contain email";
         }
@@ -203,13 +200,29 @@ export class ScimServer implements DirectoryProvider {
             return "Only replace operations are supported";
         }
 
+        // SECURITY: restrict `path` to the documented allowlist at runtime
+        // (the TS union type on ScimUserPatchOperation.path only constrains
+        // compile-time callers; `patchData` here is `JSON.parse`d directly
+        // from the request body). This is defense in depth alongside the
+        // `setPath` guard against prototype-pollution keys.
+        const ALLOWED_PATCH_PATHS = new Set(["userName", "name.formatted", "active", "name", "emails"]);
+        for (const operation of patchData.Operations) {
+            if (operation.path && !ALLOWED_PATCH_PATHS.has(operation.path)) {
+                return `Replace operations are not supported for path: ${operation.path}`;
+            }
+            if (!operation.path) {
+                for (const key of Object.keys(operation.value || {})) {
+                    if (!ALLOWED_PATCH_PATHS.has(key)) {
+                        return `Replace operations are not supported for path: ${key}`;
+                    }
+                }
+            }
+        }
+
         return null;
     }
 
     private _validateScimGroup(group: ScimGroup) {
-        // TODO: Remove this
-        console.log(JSON.stringify({ group }, null, 2));
-
         if (!group.displayName) {
             return "Group must contain displayName";
         }
@@ -218,9 +231,6 @@ export class ScimServer implements DirectoryProvider {
     }
 
     private _validateScimGroupPatchData(patchData: ScimGroupPatch) {
-        // TODO: Remove this
-        console.log(JSON.stringify({ patchData }, null, 2));
-
         if (!Array.isArray(patchData.Operations) || patchData.Operations.length === 0) {
             return "No operations detected";
         }
@@ -275,7 +285,6 @@ export class ScimServer implements DirectoryProvider {
         );
 
         const type = matchUrl?.groups?.resourceType?.toLowerCase();
-        console.log("type", type);
         const resourceType = (type === "users" ? "User" : type === "groups" ? "Group" : undefined) as
             | "Group"
             | "User"
@@ -708,58 +717,77 @@ export class ScimServer implements DirectoryProvider {
             return this._sendErrorResponse(httpRes, 400, "Empty SCIM Secret Token / Org Id");
         }
 
-        const scimOrg = await this._getScimOrg(orgId);
-        if (!scimOrg) {
+        try {
+            // SECURITY: unlike POST/PATCH/DELETE, this handler used to only
+            // check that `secretToken` was non-empty and NEVER compared it
+            // against `org.directory.scim.secret` -- a full authentication
+            // bypass letting anyone who merely knows (or enumerates) an
+            // `orgId` list every SCIM user/group of that org, including PII.
+            const org = await this.storage.get(Org, orgId);
+
+            if (!org.directory.scim) {
+                return this._sendErrorResponse(httpRes, 400, "SCIM has not been configured for this org.");
+            }
+
+            const secretTokenMatches = await getCryptoProvider().timingSafeEqual(
+                org.directory.scim.secret,
+                base64ToBytes(secretToken)
+            );
+
+            if (!secretTokenMatches) {
+                return this._sendErrorResponse(httpRes, 401, "Invalid SCIM Secret Token");
+            }
+
+            const scimOrg = await this._getScimOrg(orgId);
+            if (!scimOrg) {
+                return this._sendErrorResponse(httpRes, 404, "An organization with this id does not exist.");
+            }
+            const listResponse: ScimListResponse = {
+                id: await uuid(),
+                schemas: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
+                totalResults: 0,
+                Resources: [],
+                startIndex: 1,
+                itemsPerPage: 20,
+            };
+
+            if (!resourceType || resourceType === "Group") {
+                const groups = scimOrg.groups.filter((group) => {
+                    if (objectId) {
+                        return group.id === objectId;
+                    }
+
+                    if (queryField === "displayName" && queryOperator === "eq") {
+                        return group.displayName === queryValue.replace(/"/g, "");
+                    }
+
+                    return true;
+                });
+                listResponse.Resources.push(...groups);
+            }
+
+            if (!resourceType || resourceType === "User") {
+                const users = scimOrg.users.filter((user) => {
+                    if (objectId) {
+                        return user.id === objectId;
+                    }
+
+                    if (queryField === "userName" && queryOperator === "eq") {
+                        return user.userName === queryValue.replace(/"/g, "");
+                    }
+
+                    return true;
+                });
+                listResponse.Resources.push(...users);
+            }
+
+            // TODO: Add proper pagination
+            listResponse.totalResults = listResponse.itemsPerPage = listResponse.Resources.length;
+
+            return this._sendResponse(httpRes, 200, listResponse);
+        } catch (error) {
             return this._sendErrorResponse(httpRes, 404, "An organization with this id does not exist.");
         }
-        const listResponse: ScimListResponse = {
-            id: await uuid(),
-            schemas: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
-            totalResults: 0,
-            Resources: [],
-            startIndex: 1,
-            itemsPerPage: 20,
-        };
-
-        if (!resourceType || resourceType === "Group") {
-            const groups = scimOrg.groups.filter((group) => {
-                if (objectId) {
-                    return group.id === objectId;
-                }
-
-                if (queryField === "displayName" && queryOperator === "eq") {
-                    return group.displayName === queryValue.replace(/"/g, "");
-                }
-
-                return true;
-            });
-            listResponse.Resources.push(...groups);
-        }
-
-        if (!resourceType || resourceType === "User") {
-            const users = scimOrg.users.filter((user) => {
-                if (objectId) {
-                    return user.id === objectId;
-                }
-
-                if (queryField === "userName" && queryOperator === "eq") {
-                    return user.userName === queryValue.replace(/"/g, "");
-                }
-
-                return true;
-            });
-            listResponse.Resources.push(...users);
-        }
-
-        // TODO: Add proper pagination
-        listResponse.totalResults = listResponse.itemsPerPage = listResponse.Resources.length;
-
-        // TODO: Remove this
-        console.log(
-            JSON.stringify({ listResponse, objectId, orgId, filter, queryField, queryOperator, queryValue }, null, 2)
-        );
-
-        return this._sendResponse(httpRes, 200, listResponse);
     }
 
     private _handleScimPost(httpReq: IncomingMessage, httpRes: ServerResponse) {
@@ -799,9 +827,6 @@ export class ScimServer implements DirectoryProvider {
     }
 
     private async _handleScimRequest(httpReq: IncomingMessage, httpRes: ServerResponse) {
-        // TODO: Remove this
-        console.log(JSON.stringify({ method: httpReq.method, url: httpReq.url, headers: httpReq.headers }, null, 2));
-
         switch (httpReq.method) {
             case "GET":
                 return this._handleScimGet(httpReq, httpRes);
