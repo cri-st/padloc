@@ -15,6 +15,15 @@ import { captureHqException, initializeHqInstrumentationFromEnv, withHqSpan } fr
 
 let cachedServer: Server | undefined;
 
+/** Parses a numeric env var, falling back to `fallback` for anything that
+ * isn't a finite positive number (missing, empty, non-numeric, zero,
+ * negative) -- see RateLimitDO.consume()'s matching guard for why a bare
+ * `Number(...)` here was a fail-open bug. */
+function safeParsePositiveNumber(value: string | undefined, fallback: number): number {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 interface HealthcheckStatus {
     status: "ok" | "degraded";
     version: string;
@@ -88,6 +97,45 @@ export function shareViewRateLimitKeys(method: string, params: unknown[] | undef
 }
 
 /**
+ * RPC methods that touch the login/signup/account-recovery critical path.
+ * These are already protected by the persistent account-lockout counter
+ * (per-email, see account-lock.ts) and the coarse 100/min-per-IP general
+ * limiter above, but neither of those is method-scoped: the general
+ * limiter budget is shared with every other RPC call a legitimate client
+ * makes (vault sync, item CRUD, ...), so an attacker distributing guesses
+ * across many different accounts (never tripping any single account's
+ * lockout) can still consume a large fraction of that shared 100/min
+ * budget on login attempts alone. A tighter, method-scoped limiter here
+ * closes that gap without affecting normal usage of every other endpoint.
+ */
+const AUTH_SENSITIVE_METHODS = new Set([
+    "startCreateSession",
+    "completeCreateSession",
+    "startAuthRequest",
+    "completeAuthRequest",
+    "createAccount",
+    "recoverAccount",
+    // Legacy (V3Compat) equivalents -- see core/src/v3-compat.ts.
+    "initAuth",
+    "createSession",
+    "requestMFACode",
+    "retrieveMFAToken",
+]);
+
+/**
+ * Checks the auth-sensitive rate limiter for a request. Returns `true`
+ * when the request is allowed (including every request whose method isn't
+ * in `AUTH_SENSITIVE_METHODS`, which this limiter doesn't apply to).
+ */
+export async function checkAuthRateLimit(method: string, ip: string, limiter: RateLimiterLike): Promise<boolean> {
+    if (!AUTH_SENSITIVE_METHODS.has(method)) {
+        return true;
+    }
+    const result = await limiter.check(`auth-strict:ip:${ip}`);
+    return result.allowed;
+}
+
+/**
  * Checks the share-view rate limiter for a request. Returns `true` when the
  * request is allowed (including every request whose method isn't
  * `peekShare`/`revealShare`, which this limiter doesn't apply to).
@@ -111,9 +159,26 @@ export default {
         initializeHqInstrumentationFromEnv(env, ctx);
 
         const allowOrigin = env.ALLOW_ORIGIN || "*";
-        if (allowOrigin === "*" && (env.HQ_ENVIRONMENT === "production" || env.HQ_ENVIRONMENT === "staging")) {
+        // SECURITY: previously blocked wildcard CORS only when
+        // HQ_ENVIRONMENT was EXACTLY "production"/"staging" -- an
+        // operator who deploys without setting that (optional, telemetry
+        // -oriented) var at all silently got wildcard CORS with no
+        // warning. Inverted to an allowlist of known-safe environments
+        // instead: any deployment whose HQ_ENVIRONMENT is missing,
+        // misspelled, or simply not one of the local/dev-oriented values
+        // below now fails closed rather than fails open. The committed
+        // wrangler.toml (dev) and wrangler.local.toml.example
+        // (staging/production) templates already set HQ_ENVIRONMENT
+        // correctly, so this doesn't change behavior for a deployment
+        // following those templates -- only for one that doesn't.
+        const WILDCARD_CORS_SAFE_ENVIRONMENTS = new Set(["development", "preview", "test", "local"]);
+        if (allowOrigin === "*" && !WILDCARD_CORS_SAFE_ENVIRONMENTS.has(env.HQ_ENVIRONMENT || "")) {
             captureHqException(
-                new Error(`ALLOW_ORIGIN misconfigured: resolved to '*' in ${env.HQ_ENVIRONMENT}`),
+                new Error(
+                    `ALLOW_ORIGIN misconfigured: resolved to '*' in HQ_ENVIRONMENT=${JSON.stringify(
+                        env.HQ_ENVIRONMENT || null
+                    )} (not a recognized safe-for-wildcard environment)`
+                ),
                 requestAttributes(request)
             );
             return new Response(JSON.stringify({ error: "server_misconfigured" }), {
@@ -140,9 +205,13 @@ export default {
         // binding is optional (falls back to always-allow, same as every
         // other optional binding in this file) so deployments that haven't
         // added the migration yet degrade safely rather than 500ing.
+        // SECURITY: validated instead of a bare Number(...) -- an invalid
+        // (non-numeric) env var value produces NaN, and NaN comparisons
+        // are always false, which silently disabled rate limiting
+        // entirely (see RateLimitDO.consume()'s matching defense).
         config.rateLimiter = new DurableObjectRateLimiter(env.GENERAL_RATE_LIMIT, {
-            maxRequests: Number(env.RATE_LIMIT_MAX_REQUESTS || 100),
-            windowMs: Number(env.RATE_LIMIT_WINDOW_MS || 60000),
+            maxRequests: safeParsePositiveNumber(env.RATE_LIMIT_MAX_REQUESTS, 100),
+            windowMs: safeParsePositiveNumber(env.RATE_LIMIT_WINDOW_MS, 60000),
         });
         // Structurally atomic (Durable-Object-backed) -- a security audit
         // found the KV-backed RateLimiter's get()-then-put() has no
@@ -155,6 +224,16 @@ export default {
             maxRequests: 10,
             windowMs: 60_000,
         });
+        // Reuses the SAME `GENERAL_RATE_LIMIT` Durable Object namespace as
+        // the general-purpose limiter above (no new binding/migration
+        // needed) -- `RateLimitDO` instances are keyed per-identity via
+        // `idFromName`, so the distinct "auth-strict:" key prefix in
+        // `checkAuthRateLimit` maps to entirely separate DO instances with
+        // their own independent bucket state and limits.
+        const authRateLimiter = new DurableObjectRateLimiter(env.GENERAL_RATE_LIMIT, {
+            maxRequests: 20,
+            windowMs: 60_000,
+        });
         const receiver = new WorkerReceiver(config);
 
         const url = new URL(request.url);
@@ -164,7 +243,16 @@ export default {
                 { attributes: requestAttributes(request) },
                 () => healthcheck(env)
             );
-            return new Response(JSON.stringify(health), {
+            // SECURITY: this endpoint is intentionally reachable with no
+            // auth and no rate limiting (load balancers need it to work
+            // unconditionally), so it must not hand an unauthenticated
+            // caller a per-subsystem breakdown (which of D1/R2/Resend is
+            // currently degraded) -- low-value recon, but recon
+            // nonetheless. `healthcheck(env)` still computes and returns
+            // the full per-subsystem detail (kept for any future
+            // operator-facing surface), but only status/version are put
+            // in the public HTTP response below.
+            return new Response(JSON.stringify({ status: health.status, version: health.version }), {
                 status: 200,
                 headers: responseHeaders({ allowOrigin }, undefined, {
                     "Content-Type": "application/json; charset=utf-8",
@@ -203,6 +291,15 @@ export default {
                             shareViewRateLimiter
                         );
                         if (!shareViewAllowed) {
+                            const res = new PlResponse();
+                            res.error = {
+                                code: ErrorCode.BAD_REQUEST,
+                                message: "Too many requests. Please try again later.",
+                            };
+                            return res;
+                        }
+                        const authAllowed = await checkAuthRateLimit(req.method, ip, authRateLimiter);
+                        if (!authAllowed) {
                             const res = new PlResponse();
                             res.error = {
                                 code: ErrorCode.BAD_REQUEST,

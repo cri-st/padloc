@@ -73,6 +73,20 @@ export class RateLimitDO extends DurableObject<Env> {
      * token count.
      */
     async consume(maxRequests: number, windowMs: number): Promise<RateLimitConsumeResult> {
+        // SECURITY: a misconfigured caller (e.g. RATE_LIMIT_MAX_REQUESTS
+        // set to a non-numeric env var value) could previously pass NaN
+        // through to here. `NaN <= 0` is always false in JS, so the
+        // "blocked" branch below never triggered and this DO silently
+        // became an unconditional allow-everyone rate limiter. Falling
+        // back to safe defaults here means a bad config degrades to
+        // "rate limiting still works, just with default numbers" instead
+        // of "rate limiting is completely disabled".
+        if (!Number.isFinite(maxRequests) || maxRequests <= 0) {
+            maxRequests = 100;
+        }
+        if (!Number.isFinite(windowMs) || windowMs <= 0) {
+            windowMs = 60_000;
+        }
         const now = Date.now();
         const row = this._getRow();
 

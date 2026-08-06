@@ -21,7 +21,13 @@ account_id = "<your-cloudflare-account-id>"
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["AccountLockDO"]
+# AccountLockDO keeps no Durable Object storage (pure in-memory FIFO
+# state, see locks/account-lock.ts) so it uses the non-SQLite `new_classes`
+# migration -- matching the committed wrangler.toml's dev/preview envs.
+# This template previously drifted to `new_sqlite_classes`, which would
+# have provisioned a real staging/production deployment differently from
+# what dev/preview actually run.
+new_classes = ["AccountLockDO"]
 
 [[migrations]]
 tag = "v2"

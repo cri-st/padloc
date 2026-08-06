@@ -1,4 +1,5 @@
 import { Env } from "./env";
+import { redact } from "./observability/log-redaction";
 
 export type HqTelemetryStatus = "disabled" | "ready" | "degraded";
 
@@ -351,7 +352,21 @@ function normalizeError(error: unknown): { name: string; message: string; stack?
 }
 
 function sanitizeAttributes(attributes: Record<string, unknown>): Record<string, unknown> {
-    return Object.fromEntries(Object.entries(attributes).map(([key, value]) => [key, sanitizeValue(value)]));
+    // SECURITY: field-name-based redaction (password/key/vault/session/...
+    // patterns, see observability/log-redaction.ts) runs BEFORE the
+    // existing length-truncation below. Previously this module had its
+    // OWN weaker sanitization (truncate long strings to 160 chars) that
+    // never filtered by field name at all, while log-redaction.ts's
+    // `redact()`/`isSensitiveField()` -- written specifically for this
+    // purpose -- sat completely unused/uncalled anywhere in the codebase.
+    // Deliberately NOT applied to the exception name/message/stack in
+    // sendSentryEvent(): those are intentionally passed through in full so
+    // operators can actually debug `report: true` errors (see error.ts's
+    // sanitizeError() design) -- only the surrounding `attributes`/`extra`
+    // span data (which can carry arbitrary structured caller-supplied
+    // fields) needs this.
+    const redacted = redact(attributes);
+    return Object.fromEntries(Object.entries(redacted).map(([key, value]) => [key, sanitizeValue(value)]));
 }
 
 function sanitizeValue(value: unknown): unknown {

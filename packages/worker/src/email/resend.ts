@@ -102,13 +102,20 @@ export class ResendMessenger {
             try {
                 body = await res.text();
             } catch {}
-            console.error("Resend send failed", {
-                status: res.status,
-                template: msg.template,
-                body,
-            });
+            // SECURITY: Resend's error response body often echoes back the
+            // rejected request payload (including the recipient's email
+            // address / other PII), so it must never land in a plain
+            // `console.error` -- that's a much wider-reach, less
+            // access-controlled channel (wrangler tail, any configured
+            // Cloudflare Logpush drain) than the dedicated operator
+            // telemetry pipeline. Only status/template (never PII) go to
+            // console.error; the raw body still reaches operators via
+            // `report: true` + `error:` -> captureHqException, same
+            // pattern used for the D1/R2 error fixes above.
+            console.error("Resend send failed", { status: res.status, template: msg.template });
             throw new Err(ErrorCode.SERVER_ERROR, `Resend request failed [${res.status}]`, {
                 report: true,
+                error: new Error(`Resend send failed (status ${res.status}, template ${msg.template}): ${body}`),
             });
         }
     }
