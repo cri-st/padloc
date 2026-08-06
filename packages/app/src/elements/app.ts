@@ -181,6 +181,21 @@ export class App extends ServiceWorker(StateMixin(AutoSync(ErrorHandling(AutoLoc
                 background: var(--color-background);
             }
 
+            /*
+             * The anonymous /share/:id page must have NO app chrome. A
+             * plain [hidden] attribute alone would lose to .wrapper's own
+             * "display: flex" (same-origin author rules, later/equal
+             * specificity does not guarantee [hidden] wins) -- this
+             * higher-specificity rule (class + attribute) makes ?hidden
+             * actually remove .wrapper (and the pl-menu/vault UI inside
+             * it) from layout while a logged-in visitor is on the share
+             * page, instead of only the previous purely cosmetic 3D
+             * transform below.
+             */
+            .wrapper[hidden] {
+                display: none;
+            }
+
             pl-menu {
                 width: var(--menu-width);
                 padding-top: var(--inset-top);
@@ -332,7 +347,7 @@ export class App extends ServiceWorker(StateMixin(AutoSync(ErrorHandling(AutoLoc
 
                 <pl-share-view class="fullbleed" ?hidden=${this._page !== "share"}></pl-share-view>
 
-                <div class="wrapper">
+                <div class="wrapper" ?hidden=${this._page === "share"}>
                     <pl-menu></pl-menu>
 
                     <div class="views">
