@@ -22,6 +22,8 @@ import { DurableObjectShareStorage } from "./storage/share-do-storage";
 import { ResendMessenger, MockMessenger } from "./email/resend";
 import { WorkerPlatform } from "./platform";
 import { Env } from "./env";
+import { AccountLockProvider, InProcessAccountLockProvider } from "@padloc/core/src/account-lock";
+import { withAccountLocks } from "./locks/account-lock";
 
 export function createServer(env: Env): Server {
     setPlatform(new WorkerPlatform());
@@ -32,6 +34,17 @@ export function createServer(env: Env): Server {
     const messenger: Messenger = createMessenger(env);
     const attachmentStorage: AttachmentStorage = createAttachmentStorage(env);
     const shareStorage = env.SHARE_LINKS ? new DurableObjectShareStorage(env.SHARE_LINKS) : undefined;
+    // Cross-isolate lock for the persistent login-lockout critical section
+    // in `completeCreateSession`/`completeAuthRequest` (see
+    // `@padloc/core/src/account-lock.ts`). Falls back to the in-process
+    // mutex (still correct for a single isolate, just not across the
+    // Worker's multiple concurrent isolates) when `ACCOUNT_LOCK` isn't
+    // bound, rather than silently disabling locking altogether.
+    const inProcessAccountLockFallback = new InProcessAccountLockProvider();
+    const accountLock: AccountLockProvider = {
+        withLock: (ids, fn) =>
+            env.ACCOUNT_LOCK ? withAccountLocks(ids, env.ACCOUNT_LOCK, fn) : inProcessAccountLockFallback.withLock(ids, fn),
+    };
     const changeLoggerConfig = new ChangeLoggerConfig();
     changeLoggerConfig.enabled = true;
     const requestLoggerConfig = new RequestLoggerConfig();
@@ -90,7 +103,8 @@ export function createServer(env: Env): Server {
         changeLogger,
         requestLogger,
         undefined, // legacyServer -- not supported in the worker runtime
-        shareStorage
+        shareStorage,
+        accountLock
     );
 }
 

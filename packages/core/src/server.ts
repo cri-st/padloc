@@ -1,4 +1,5 @@
 import { Serializable, stringToBase64, bytesToBase64, stringToBytes } from "./encoding";
+import { AccountLockProvider, InProcessAccountLockProvider } from "./account-lock";
 import {
     API,
     StartCreateSessionParams,
@@ -218,6 +219,10 @@ export class Controller extends API {
      */
     get shareStorage() {
         return this.server.shareStorage;
+    }
+
+    get accountLock(): AccountLockProvider {
+        return this.server.accountLock;
     }
 
     get legacyServer() {
@@ -484,56 +489,117 @@ export class Controller extends API {
     }
 
     async completeAuthRequest({ email, id, data }: CompleteAuthRequestParams) {
-        const auth = (this.context.auth = await this._getAuth(email));
+        // Serialized per-email alongside completeCreateSession (see
+        // account-lock.ts) -- this is the SAME persistent lockout counter
+        // (auth.failedLoginAttempts/lockedUntil), shared across the
+        // password (SRP) and every MFA/auth-token verification path, so it
+        // must be protected by the same lock to avoid the identical
+        // concurrent-guess race.
+        return this.accountLock.withLock([email], async () => {
+            const auth = (this.context.auth = await this._getAuth(email));
 
-        const request = auth.authRequests.find((m) => m.id === id);
-        if (!request) {
-            throw new Err(ErrorCode.AUTHENTICATION_FAILED, "Failed to complete auth request.");
-        }
-
-        if (request.tries >= 3) {
-            throw new Err(ErrorCode.AUTHENTICATION_TRIES_EXCEEDED, "You have exceed your allowed numer of tries!");
-        }
-
-        const authenticators = await this._getAuthenticators(auth);
-
-        const authenticator = authenticators.find((m) => m.id === request.authenticatorId);
-        if (!authenticator) {
-            throw new Err(ErrorCode.AUTHENTICATION_FAILED, "Failed to start auth request.");
-        }
-
-        if (request.type !== authenticator.type) {
-            throw new Err(
-                ErrorCode.AUTHENTICATION_FAILED,
-                "The auth request type and authenticator type do not match!"
-            );
-        }
-
-        const provider = this._getAuthServer(request.type);
-
-        let metaData: any = undefined;
-
-        try {
-            metaData = await provider.verifyAuthRequest(authenticator, request, data);
-
-            request.status = AuthRequestStatus.Verified;
-            request.verified = new Date();
-            if (request.purpose === AuthPurpose.TestAuthenticator) {
-                // We're merely testing the authenticator, so we can get rid of the
-                // mfa token right away.
-                await this.storage.save(auth);
-                await this._useAuthToken({
-                    email,
-                    requestId: request.id,
-                    ...request,
-                });
-            } else {
-                authenticator.lastUsed = new Date();
-                await this.storage.save(auth);
+            // Persistent per-account lockout (see completeCreateSession).
+            // Without this check here, an account already locked out from
+            // password guessing could still be hammered via its MFA/email
+            // -code authenticators -- and separately, `request.tries` alone
+            // is not a real limit: a fresh `AuthRequest` (tries=0) can be
+            // minted for free and without limit via `startAuthRequest`, so
+            // only a persistent, per-account counter actually bounds total
+            // guesses.
+            if (auth.lockedUntil && auth.lockedUntil.getTime() > Date.now()) {
+                throw new Err(
+                    ErrorCode.AUTHENTICATION_TRIES_EXCEEDED,
+                    "Too many failed login attempts. Please try again later."
+                );
             }
-        } catch (e) {
-            request.tries++;
+
+            const request = auth.authRequests.find((m) => m.id === id);
+            if (!request) {
+                throw new Err(ErrorCode.AUTHENTICATION_FAILED, "Failed to complete auth request.");
+            }
+
+            if (request.tries >= 3) {
+                throw new Err(ErrorCode.AUTHENTICATION_TRIES_EXCEEDED, "You have exceed your allowed numer of tries!");
+            }
+
+            // Single-use: a request already `Verified` (or `Canceled`) must
+            // never be re-verified. Without this, a captured/replayed
+            // WebAuthn assertion can pass `verifyAuthRequest` a second time
+            // for platform authenticators whose signature counter never
+            // increments (counter stays 0, which makes the library's own
+            // clone-detection a no-op) -- see the WebAuthn security review.
+            if (request.status !== AuthRequestStatus.Started) {
+                throw new Err(ErrorCode.AUTHENTICATION_FAILED, "Failed to complete auth request.");
+            }
+
+            const authenticators = await this._getAuthenticators(auth);
+
+            const authenticator = authenticators.find((m) => m.id === request.authenticatorId);
+            if (!authenticator) {
+                throw new Err(ErrorCode.AUTHENTICATION_FAILED, "Failed to start auth request.");
+            }
+
+            if (request.type !== authenticator.type) {
+                throw new Err(
+                    ErrorCode.AUTHENTICATION_FAILED,
+                    "The auth request type and authenticator type do not match!"
+                );
+            }
+
+            const provider = this._getAuthServer(request.type);
+
+            let metaData: any = undefined;
+
+            try {
+                metaData = await provider.verifyAuthRequest(authenticator, request, data);
+
+                request.status = AuthRequestStatus.Verified;
+                request.verified = new Date();
+                if (request.purpose === AuthPurpose.TestAuthenticator) {
+                    // We're merely testing the authenticator, so we can get rid of the
+                    // mfa token right away.
+                    await this.storage.save(auth);
+                    await this._useAuthToken({
+                        email,
+                        requestId: request.id,
+                        ...request,
+                    });
+                } else {
+                    authenticator.lastUsed = new Date();
+                    await this.storage.save(auth);
+                }
+            } catch (e) {
+                request.tries++;
+                // Feed the SAME persistent per-account counter the password
+                // path uses, so unlimited free guesses via fresh
+                // `AuthRequest`s (tries always resettable to 0) still
+                // eventually trip the 10-attempt/15-minute lockout.
+                ++auth.failedLoginAttempts;
+                if (auth.failedLoginAttempts >= 10) {
+                    auth.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+                }
+                await this.storage.save(auth);
+
+                this.log("account.completeAuthRequest", {
+                    authRequest: {
+                        id: request.id,
+                        type: request.type,
+                        purpose: request.purpose,
+                    },
+                    success: false,
+                    error: typeof e === "string" ? e : e.message,
+                });
+
+                throw e;
+            }
+
+            auth.metaData = auth.metaData ? { ...auth.metaData, ...metaData } : metaData;
             await this.storage.save(auth);
+
+            const deviceTrusted =
+                auth && this.context.device && auth.trustedDevices.some(({ id }) => id === this.context.device!.id);
+
+            const provisioning = await this.provisioner.getProvisioning(auth);
 
             this.log("account.completeAuthRequest", {
                 authRequest: {
@@ -541,35 +607,15 @@ export class Controller extends API {
                     type: request.type,
                     purpose: request.purpose,
                 },
-                success: false,
-                error: typeof e === "string" ? e : e.message,
+                success: true,
             });
 
-            throw e;
-        }
-
-        auth.metaData = auth.metaData ? { ...auth.metaData, ...metaData } : metaData;
-        await this.storage.save(auth);
-
-        const deviceTrusted =
-            auth && this.context.device && auth.trustedDevices.some(({ id }) => id === this.context.device!.id);
-
-        const provisioning = await this.provisioner.getProvisioning(auth);
-
-        this.log("account.completeAuthRequest", {
-            authRequest: {
-                id: request.id,
-                type: request.type,
-                purpose: request.purpose,
-            },
-            success: true,
-        });
-
-        return new CompleteAuthRequestResponse({
-            accountStatus: auth.accountStatus,
-            deviceTrusted,
-            provisioning: provisioning.account,
-            legacyData: auth.legacyData,
+            return new CompleteAuthRequestResponse({
+                accountStatus: auth.accountStatus,
+                deviceTrusted,
+                provisioning: provisioning.account,
+                legacyData: auth.legacyData,
+            });
         });
     }
 
@@ -683,127 +729,163 @@ export class Controller extends API {
         M,
         addTrustedDevice,
     }: CompleteCreateSessionParams): Promise<Session> {
-        // Fetch the account in question
-        const acc = (this.context.account = await this.storage.get(Account, account));
-        const auth = (this.context.auth = await this._getAuth(acc.email));
-        this.context.provisioning = await this.provisioner.getProvisioning(auth);
+        // Fetch the account OUTSIDE the lock, just to resolve its email --
+        // the Account object itself isn't part of the raced critical
+        // section (only Auth.failedLoginAttempts/lockedUntil is), and the
+        // lock key MUST be the email, matching completeAuthRequest's lock
+        // key below. Both paths read/increment the SAME per-email Auth
+        // record's persistent lockout counter; locking completeCreateSession
+        // on the account id (a DIFFERENT key from completeAuthRequest's
+        // email key) would let a concurrent password guess and a
+        // concurrent MFA/auth-token guess for the same account race right
+        // past each other -- two different lock keys guarding the same
+        // shared counter is not mutual exclusion at all.
+        const acc = await this.storage.get(Account, account);
 
-        // Persistent per-account lockout: unlike AuthRequest.tries and
-        // SRPSession.failedAttempts (which both reset whenever the client
-        // requests a fresh session), auth.failedLoginAttempts/lockedUntil
-        // survive across sessions, so an attacker can't dodge the lockout
-        // by simply starting a new SRP session for every guess.
-        if (auth.lockedUntil && auth.lockedUntil.getTime() > Date.now()) {
-            throw new Err(
-                ErrorCode.AUTHENTICATION_TRIES_EXCEEDED,
-                "Too many failed login attempts. Please try again later."
-            );
-        }
+        // The whole read-check-increment-save critical section below runs
+        // inside `this.accountLock` (per-email, see account-lock.ts) so
+        // concurrent completeCreateSession AND completeAuthRequest calls
+        // for the SAME account can't race the persistent lockout counter
+        // against each other -- without this, N concurrent wrong guesses
+        // (of either kind) each read the same stale
+        // `auth.failedLoginAttempts` value before any of them saved, so
+        // only the last write landed and the counter only ever advanced
+        // by 1 per burst regardless of how many guesses actually
+        // happened, completely defeating the 10-attempt lockout.
+        return this.accountLock.withLock([acc.email], async () => {
+            this.context.account = acc;
+            const auth = (this.context.auth = await this._getAuth(acc.email));
+            this.context.provisioning = await this.provisioner.getProvisioning(auth);
 
-        // Get the pending SRP context for the given account
-        const srpSession = auth.srpSessions.find((s) => s.id === srpId);
-
-        if (!srpSession) {
-            throw new Err(ErrorCode.INVALID_SESSION, "No srp session with the given id found!");
-        }
-
-        const srp = new SRPServer(srpSession);
-
-        // Apply `A` received from the client to the SRP context. This will
-        // compute the common session key and verification value.
-        await srp.setA(A);
-
-        // Verify `M`, which is the clients way of proving that they know the
-        // accounts master password. This also guarantees that the session key
-        // computed by the client and server are identical an can be used for
-        // authentication.
-        if (!(await getCryptoProvider().timingSafeEqual(M, srp.M1!))) {
-            this.log("account.createSession", { success: false });
-            ++srpSession.failedAttempts;
-            ++auth.failedLoginAttempts;
-            if (auth.failedLoginAttempts >= 10) {
-                auth.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+            // Persistent per-account lockout: unlike AuthRequest.tries and
+            // SRPSession.failedAttempts (which both reset whenever the client
+            // requests a fresh session), auth.failedLoginAttempts/lockedUntil
+            // survive across sessions, so an attacker can't dodge the lockout
+            // by simply starting a new SRP session for every guess.
+            if (auth.lockedUntil && auth.lockedUntil.getTime() > Date.now()) {
+                throw new Err(
+                    ErrorCode.AUTHENTICATION_TRIES_EXCEEDED,
+                    "Too many failed login attempts. Please try again later."
+                );
             }
-            if (srpSession.failedAttempts >= 5) {
-                if (this.context.device) {
-                    try {
-                        await this.removeTrustedDevice(this.context.device.id);
-                    } catch (e) {}
+
+            // Get the pending SRP context for the given account
+            const srpSession = auth.srpSessions.find((s) => s.id === srpId);
+
+            if (!srpSession) {
+                throw new Err(ErrorCode.INVALID_SESSION, "No srp session with the given id found!");
+            }
+
+            const srp = new SRPServer(srpSession);
+
+            // Apply `A` received from the client to the SRP context. This will
+            // compute the common session key and verification value.
+            await srp.setA(A);
+
+            // Verify `M`, which is the clients way of proving that they know the
+            // accounts master password. This also guarantees that the session key
+            // computed by the client and server are identical an can be used for
+            // authentication.
+            if (!(await getCryptoProvider().timingSafeEqual(M, srp.M1!))) {
+                this.log("account.createSession", { success: false });
+                ++srpSession.failedAttempts;
+                ++auth.failedLoginAttempts;
+                // True exactly once, the instant the persistent counter trips
+                // the lockout threshold -- used below so the alert email
+                // fires on THIS transition even when it happens without the
+                // per-session counter (srpSession.failedAttempts) ever
+                // reaching its own, independent 5-in-one-session threshold
+                // (e.g. an attacker pacing 4 guesses per fresh SRP session
+                // to stay under that signal would otherwise reach, and even
+                // trigger, the 10-attempt lockout with zero warning ever sent).
+                const justLocked = auth.failedLoginAttempts >= 10 && !auth.lockedUntil;
+                if (auth.failedLoginAttempts >= 10) {
+                    auth.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+                }
+                if (srpSession.failedAttempts >= 5 || justLocked) {
+                    if (this.context.device) {
+                        try {
+                            await this.removeTrustedDevice(this.context.device.id);
+                        } catch (e) {}
+                    }
+
+                    // Delete pending SRP context
+                    auth.srpSessions = auth.srpSessions.filter((s) => s.id !== srpSession.id);
+                    await this.storage.save(auth);
+
+                    if (acc.settings.notifications.failedLoginAttempts) {
+                        try {
+                            const location = this._buildLocationAndDeviceString(
+                                this.context.location,
+                                this.context.device
+                            );
+
+                            this.messenger.send(acc.email, new FailedLoginAttemptMessage({ location }));
+                        } catch (e) {}
+                    }
+                } else {
+                    // Saves the updated failed attempts
+                    await this.storage.save(auth);
                 }
 
-                // Delete pending SRP context
-                auth.srpSessions = auth.srpSessions.filter((s) => s.id !== srpSession.id);
-                await this.storage.save(auth);
+                throw new Err(ErrorCode.INVALID_CREDENTIALS);
+            }
 
-                if (acc.settings.notifications.failedLoginAttempts) {
+            // Verification succeeded -- clear the persistent lockout counter.
+            auth.failedLoginAttempts = 0;
+            auth.lockedUntil = undefined;
+
+            // Create a new session object
+            const session = new Session();
+            session.id = await uuid();
+            session.created = new Date();
+            // Absolute lifetime cap, independent of the 14-day idle-timeout sweep
+            // in _getAuth -- bounds the blast radius of a leaked/stolen session
+            // key even if the session keeps getting used.
+            session.expires = new Date(session.created.getTime() + 90 * 24 * 60 * 60 * 1000);
+            session.account = account;
+            session.device = this.context.device;
+            session.key = srp.K!;
+            session.asAdmin = srpSession.asAdmin;
+
+            // Add the session to the list of active sessions
+            auth.sessions.push(session.info);
+
+            // Delete pending SRP context
+            auth.srpSessions = auth.srpSessions.filter((s) => s.id !== srpSession.id);
+
+            // Persist changes
+            await Promise.all([this.storage.save(session), this.storage.save(acc)]);
+
+            // Check if device isn't trusted
+            if (this.context.device && !auth.trustedDevices.some(({ id }) => id === this.context.device!.id)) {
+                // Add to trusted devices
+                if (addTrustedDevice) {
+                    auth.trustedDevices.push(this.context.device);
+                }
+
+                // Send new login notification (it's a new or untrusted device)
+                if (acc.settings.notifications.newLogins) {
                     try {
                         const location = this._buildLocationAndDeviceString(this.context.location, this.context.device);
 
-                        this.messenger.send(acc.email, new FailedLoginAttemptMessage({ location }));
+                        this.messenger.send(acc.email, new NewLoginMessage({ location }));
                     } catch (e) {}
                 }
-            } else {
-                // Saves the updated failed attempts
-                await this.storage.save(auth);
             }
+            await this.storage.save(auth);
 
-            throw new Err(ErrorCode.INVALID_CREDENTIALS);
-        }
+            // Although the session key is secret in the sense that it should never
+            // be transmitted between client and server, it still needs to be
+            // stored on both sides, which is why it is included in the [[Session]]
+            // classes serialization. So we have to make sure to remove the key
+            // explicitly before returning.
+            delete session.key;
 
-        // Verification succeeded -- clear the persistent lockout counter.
-        auth.failedLoginAttempts = 0;
-        auth.lockedUntil = undefined;
+            this.log("account.createSession", { success: true });
 
-        // Create a new session object
-        const session = new Session();
-        session.id = await uuid();
-        session.created = new Date();
-        // Absolute lifetime cap, independent of the 14-day idle-timeout sweep
-        // in _getAuth -- bounds the blast radius of a leaked/stolen session
-        // key even if the session keeps getting used.
-        session.expires = new Date(session.created.getTime() + 90 * 24 * 60 * 60 * 1000);
-        session.account = account;
-        session.device = this.context.device;
-        session.key = srp.K!;
-        session.asAdmin = srpSession.asAdmin;
-
-        // Add the session to the list of active sessions
-        auth.sessions.push(session.info);
-
-        // Delete pending SRP context
-        auth.srpSessions = auth.srpSessions.filter((s) => s.id !== srpSession.id);
-
-        // Persist changes
-        await Promise.all([this.storage.save(session), this.storage.save(acc)]);
-
-        // Check if device isn't trusted
-        if (this.context.device && !auth.trustedDevices.some(({ id }) => id === this.context.device!.id)) {
-            // Add to trusted devices
-            if (addTrustedDevice) {
-                auth.trustedDevices.push(this.context.device);
-            }
-
-            // Send new login notification (it's a new or untrusted device)
-            if (acc.settings.notifications.newLogins) {
-                try {
-                    const location = this._buildLocationAndDeviceString(this.context.location, this.context.device);
-
-                    this.messenger.send(acc.email, new NewLoginMessage({ location }));
-                } catch (e) {}
-            }
-        }
-        await this.storage.save(auth);
-
-        // Although the session key is secret in the sense that it should never
-        // be transmitted between client and server, it still needs to be
-        // stored on both sides, which is why it is included in the [[Session]]
-        // classes serialization. So we have to make sure to remove the key
-        // explicitly before returning.
-        delete session.key;
-
-        this.log("account.createSession", { success: true });
-
-        return session;
+            return session;
+        });
     }
 
     async revokeSession(id: SessionID) {
@@ -1978,14 +2060,16 @@ export class Controller extends API {
         return new Err(ErrorCode.NOT_FOUND, "Share not found.");
     }
 
-    private _shareStatusOrNotFound(result: { expired: boolean; viewed: boolean } | ShareStatus | null): ShareStatus {
+    private _shareStatusOrNotFound(
+        result: { expired: boolean; viewed: boolean; revoked: boolean } | ShareStatus | null
+    ): ShareStatus {
         if (!result) {
             throw this._shareNotFoundError();
         }
 
         return result instanceof ShareStatus
             ? result
-            : new ShareStatus({ expired: result.expired, viewed: result.viewed });
+            : new ShareStatus({ expired: result.expired, viewed: result.viewed, revoked: result.revoked });
     }
 
     private _requireShareStorage(): ShareStorage {
@@ -2438,7 +2522,15 @@ export class Server {
         public requestLogger?: RequestLogger,
         public legacyServer?: LegacyServer,
         /** Password share link storage (worker-hosted only; undefined disables sharing) */
-        public shareStorage?: ShareStorage
+        public shareStorage?: ShareStorage,
+        /**
+         * Serializes concurrent completeCreateSession/completeAuthRequest
+         * critical sections per account so the persistent login-lockout
+         * counter can't be raced (see `account-lock.ts`). Defaults to an
+         * in-process mutex; hosts with multiple concurrent isolates (e.g.
+         * the Cloudflare Worker) SHOULD inject a distributed implementation.
+         */
+        public accountLock: AccountLockProvider = new InProcessAccountLockProvider()
     ) {}
 
     private _requestQueue = new Map<AccountID | OrgID, Promise<void>>();

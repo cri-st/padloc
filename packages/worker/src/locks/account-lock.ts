@@ -1,3 +1,4 @@
+import { DurableObject } from "cloudflare:workers";
 import { Env } from "../env";
 
 /**
@@ -9,13 +10,28 @@ import { Env } from "../env";
  * maintains a FIFO deferred queue. acquire() resolves only when the previous
  * caller releases, so RPC callers that "own" the lock hold it until they call
  * release().
+ *
+ * MUST extend the runtime's `DurableObject` base class (from
+ * `cloudflare:workers`) -- a plain class throws "does not support RPC...
+ * class was not declared with `extends DurableObject`" the moment a REAL
+ * caller (not a test's direct in-memory instantiation) invokes a stub
+ * method through a namespace binding, exactly like `ShareLinkDO`/
+ * `RateLimitDO`. This class keeps no Durable Object storage (pure
+ * in-memory FIFO state), so it stays compatible with the existing
+ * `new_classes` (non-SQLite) migration in `wrangler.toml`.
  */
-export class AccountLockDO {
-    private _pending: Promise<void> = Promise.resolve();
+export class AccountLockDO extends DurableObject<Env> {
+    private _tail: Promise<void> = Promise.resolve();
     private _release: () => void = () => {};
     private _holder: string | null = null;
+    // `setTimeout` returns a `number` handle in the Workers runtime (not
+    // Node's `Timeout` object), so this is the concrete return type, not
+    // an alias derived via `ReturnType<typeof setTimeout>`.
+    private _timer: number | null = null;
 
-    constructor(_state: DurableObjectState, _env: Env) {}
+    constructor(state: DurableObjectState, env: Env) {
+        super(state, env);
+    }
 
     /**
      * Wait until the previous holder has released the lock, then claim it.
@@ -25,28 +41,55 @@ export class AccountLockDO {
      * @param ttlMs Maximum hold duration before auto-release.
      */
     async acquire(jobId: string, ttlMs: number): Promise<void> {
-        const wait = this._pending;
-
-        let resolveNext: () => void;
-        this._pending = new Promise((res) => {
-            resolveNext = res;
+        // Register ourselves at the tail of the FIFO queue BEFORE awaiting,
+        // capturing the PREVIOUS tail as the gate we must wait on. This
+        // part is race-free on its own: each concurrent `acquire()` call's
+        // synchronous prefix (up to its own `await`) runs to completion
+        // without interruption, so the chain of `myTurn`/`myGate` promises
+        // always links up in arrival order.
+        const myTurn = this._tail;
+        let releaseMe!: () => void;
+        const myGate = new Promise<void>((res) => {
+            releaseMe = res;
         });
-        this._release = resolveNext!;
+        this._tail = myGate;
+
+        // Wait for every previously-queued caller to finish.
+        await myTurn;
+
+        // We are now the exclusive current holder. Assigning `_holder`/
+        // `_release` HERE -- after the await, not before -- is what makes
+        // this race-free: only one `acquire()` call can be executing this
+        // statement at a time (nothing else can resume between `await
+        // myTurn` settling and this line running). The previous version
+        // assigned these fields BEFORE the await, which let a LATER
+        // concurrent `acquire()` call's synchronous prefix overwrite an
+        // EARLIER caller's `_release`/`_holder` before the earlier caller
+        // ever became the real holder -- the earlier caller's `release()`
+        // then resolved the WRONG (most recently registered) caller's
+        // gate, corrupting the FIFO order and permanently deadlocking
+        // every ticket queued in between (confirmed live: a 15-way
+        // concurrent `acquire()` burst hung the whole request past its
+        // 30s test timeout before this fix).
         this._holder = jobId;
-
-        const timer = setTimeout(() => {
-            if (this._holder === jobId) this._release();
+        this._release = releaseMe;
+        this._timer = setTimeout(() => {
+            if (this._holder === jobId) {
+                this.release();
+            }
         }, ttlMs);
-
-        await wait;
-
-        clearTimeout(timer);
     }
 
     /** Release the lock so the next queued caller may proceed. */
     async release(): Promise<void> {
+        if (this._timer) {
+            clearTimeout(this._timer);
+            this._timer = null;
+        }
         this._holder = null;
-        this._release();
+        const release = this._release;
+        this._release = () => {};
+        release();
     }
 
     /** Returns the current holder's jobId or null. */

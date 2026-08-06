@@ -5,7 +5,16 @@
  *   1. Session revoke blocks request
  *   2. Session expiry blocks request
  *   3. Replay/old timestamp rejected
- *   4. Concurrent requests serialized by AccountLockDO
+ *   4. Concurrent requests serialized -- via `MockAccountLockDO`, a
+ *      hand-written FIFO reimplementation, NOT the real
+ *      `src/locks/account-lock.ts` class. Real contract coverage for the
+ *      ACTUAL `AccountLockDO` class (including a real, previously-shipped
+ *      deadlock bug in its acquire()/release() ordering that this mock's
+ *      different implementation never reproduced) lives in
+ *      test:account-lock-do (test/account-lock-do.test.mjs). Kept here
+ *      only as a fast, dependency-free illustration of the intended FIFO
+ *      contract shape -- do not treat a pass here as proof the real DO
+ *      behaves correctly.
  *
  * Note: this file previously included a "Rate-limit KV staleness does not
  * bypass D1 auth row" test that only exercised locally-reimplemented mock

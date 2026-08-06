@@ -172,6 +172,109 @@ async function runTests(): Promise<TestResult[]> {
         }
     );
 
+    await test(
+        "Concurrent wrong-password guesses (fresh SRP session each) still trip the lockout after ~10 total failures",
+        async () => {
+            // Regression test for the read-modify-write race in
+            // completeCreateSession: N concurrent completeCreateSession
+            // calls for the SAME account used to each read the same stale
+            // auth.failedLoginAttempts value before any of them saved, so
+            // a burst of concurrent guesses only ever advanced the counter
+            // by 1 total instead of N -- silently defeating the 10-attempt
+            // lockout. Fired here as a genuine concurrent burst through the
+            // real HTTP-shaped transport, exercising the actual
+            // `accountLock`/AccountLockDO wiring end-to-end.
+            //
+            // SRP session setup (startCreateSession) is done SEQUENTIALLY
+            // first, one at a time, so this test isolates the
+            // completeCreateSession race specifically -- startCreateSession
+            // has its own separate, unguarded `auth.srpSessions.push()`
+            // read-modify-write that would otherwise lose concurrently
+            // -created sessions and confound this test with an unrelated
+            // failure mode ("No srp session with the given id found").
+            const email = `lockout-race-${await uuid()}@test.padloc.app`;
+            const password = "CorrectPassword123!";
+            const wrongPassword = "WrongPassword456!";
+
+            await createAccount(email, password);
+
+            const client = await createClient();
+
+            async function prepareWrongGuess() {
+                const startRes = await client.startCreateSession(new StartCreateSessionParams({ email }));
+                const loginAuth = new Auth(email);
+                loginAuth.keyParams = startRes.keyParams;
+                const loginAuthKey = await loginAuth.getAuthKey(wrongPassword);
+                const loginSrp = new SRPClient();
+                await loginSrp.initialize(loginAuthKey);
+                await loginSrp.setB(startRes.B);
+                return new CompleteCreateSessionParams({
+                    accountId: startRes.accountId,
+                    srpId: startRes.srpId,
+                    A: loginSrp.A!,
+                    M: loginSrp.M1!,
+                });
+            }
+
+            async function completeWrongGuess(params: CompleteCreateSessionParams): Promise<"invalid_credentials" | "locked"> {
+                try {
+                    await client.completeCreateSession(params);
+                    throw new Error("Wrong password was unexpectedly accepted");
+                } catch (err: unknown) {
+                    if (err instanceof Err && err.code === ErrorCode.AUTHENTICATION_TRIES_EXCEEDED) {
+                        return "locked";
+                    }
+                    if (err instanceof Err && err.code === ErrorCode.INVALID_CREDENTIALS) {
+                        return "invalid_credentials";
+                    }
+                    throw err;
+                }
+            }
+
+            // 15 pre-established SRP sessions, well above the 10-attempt
+            // threshold. Without the fix, firing their completions
+            // concurrently would race past each other and the persistent
+            // counter would land far below 10.
+            const guessParams: CompleteCreateSessionParams[] = [];
+            for (let i = 0; i < 15; i++) {
+                guessParams.push(await prepareWrongGuess());
+            }
+
+            const outcomes = await Promise.all(guessParams.map((params) => completeWrongGuess(params)));
+            const lockedCount = outcomes.filter((o) => o === "locked").length;
+            if (lockedCount === 0) {
+                throw new Error(
+                    "None of 15 concurrent wrong-password guesses were ever rejected as locked -- the lockout counter lost updates to the race"
+                );
+            }
+
+            const startRes = await client.startCreateSession(new StartCreateSessionParams({ email }));
+            const loginAuth = new Auth(email);
+            loginAuth.keyParams = startRes.keyParams;
+            const loginAuthKey = await loginAuth.getAuthKey(password);
+            const loginSrp = new SRPClient();
+            await loginSrp.initialize(loginAuthKey);
+            await loginSrp.setB(startRes.B);
+            try {
+                await client.completeCreateSession(
+                    new CompleteCreateSessionParams({
+                        accountId: startRes.accountId,
+                        srpId: startRes.srpId,
+                        A: loginSrp.A!,
+                        M: loginSrp.M1!,
+                    })
+                );
+                throw new Error(
+                    "Correct password was accepted after a 15-way concurrent guessing burst -- the account should still be locked"
+                );
+            } catch (err: unknown) {
+                if (!(err instanceof Err) || err.code !== ErrorCode.AUTHENTICATION_TRIES_EXCEEDED) {
+                    throw err;
+                }
+            }
+        }
+    );
+
     await test("Login without triggering lockout still succeeds normally", async () => {
         const email = `lockout-control-${await uuid()}@test.padloc.app`;
         const password = "AnotherCorrectPassword789!";
