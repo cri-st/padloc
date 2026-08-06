@@ -6,6 +6,7 @@
     "private": true,
     "files": [
         "src",
+        "scripts",
         "assets",
         "tsconfig.json"
     ],
@@ -39,7 +40,7 @@
     },
     "scripts": {
         "build": "webpack --config webpack.config.js",
-        "start": "PL_PWA_PORT=${PL_PWA_PORT:-3000} http-server ${PL_PWA_DIR:-./dist} -p ${PL_PWA_PORT:-3000}",
+        "start": "node scripts/serve.js",
         "build_and_start": "npm run build && npm run start",
         "dev": "webpack serve --config webpack.config.js"
     },

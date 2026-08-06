@@ -22,6 +22,7 @@ RUN npm ci --unsafe-perm
 # Now copy over source files and assets
 COPY packages/pwa/src ./packages/pwa/src
 COPY packages/pwa/tsconfig.json packages/pwa/webpack.config.js ./packages/pwa/
+COPY packages/pwa/scripts ./packages/pwa/scripts
 COPY packages/app/src ./packages/app/src
 COPY packages/app/types ./packages/app/types
 COPY packages/app/tsconfig.json ./packages/app/
