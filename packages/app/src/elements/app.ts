@@ -24,6 +24,7 @@ import "./invite-recipient";
 import "./report";
 import "./support";
 import "./menu";
+import "./share-view";
 import { registerPlatformAuthenticator, supportsPlatformAuthenticator } from "@padloc/core/src/platform";
 import { AuthPurpose } from "@padloc/core/src/auth";
 import { ProvisioningStatus } from "@padloc/core/src/provisioning";
@@ -61,6 +62,7 @@ export class App extends ServiceWorker(StateMixin(AutoSync(ErrorHandling(AutoLoc
         "generator",
         "report",
         "support",
+        "share",
     ];
 
     @state()
@@ -114,7 +116,7 @@ export class App extends ServiceWorker(StateMixin(AutoSync(ErrorHandling(AutoLoc
         }
 
         if (!app.state.loggedIn) {
-            if (!["start", "login", "signup", "recover"].includes(page)) {
+            if (!["start", "login", "signup", "recover", "share"].includes(page)) {
                 this.go("start", { next: path || undefined, ...params }, true);
                 return;
             }
@@ -134,7 +136,7 @@ export class App extends ServiceWorker(StateMixin(AutoSync(ErrorHandling(AutoLoc
         }
 
         this._page = page;
-        const unlocked = !["start", "login", "signup", "recover", "unlock"].includes(page);
+        const unlocked = !["start", "login", "signup", "recover", "unlock", "share"].includes(page);
         setTimeout(() => this._wrapper.classList.toggle("active", unlocked), unlocked ? 600 : 0);
     }
 
@@ -328,6 +330,8 @@ export class App extends ServiceWorker(StateMixin(AutoSync(ErrorHandling(AutoLoc
             <div class="main">
                 <pl-start id="startView" active></pl-start>
 
+                <pl-share-view class="fullbleed" ?hidden=${this._page !== "share"}></pl-share-view>
+
                 <div class="wrapper">
                     <pl-menu></pl-menu>
 
@@ -395,7 +399,9 @@ export class App extends ServiceWorker(StateMixin(AutoSync(ErrorHandling(AutoLoc
     private _updateThemeColor() {
         const onStartScreen = ["start", "login", "signup", "recover", "unlock"].includes(this._page);
         const startView = this.renderRoot.querySelector("#startView") as HTMLElement | null;
-        const surface = (onStartScreen && startView) || this;
+        const shareView =
+            this._page === "share" ? (this.renderRoot.querySelector("pl-share-view") as HTMLElement | null) : null;
+        const surface = (onStartScreen && startView) || shareView || this;
         const color = getComputedStyle(surface).backgroundColor;
         if (!color) {
             return;

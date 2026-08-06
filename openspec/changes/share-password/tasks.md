@@ -47,12 +47,12 @@ Chain strategy: size-exception
 
 ## Phase 5: Client UI
 
-- [ ] 5.1 `app/item-view.ts`: add "Share Link ..." action, enabled only for `FieldType.Password` items. (Req: Item-Type Scope)
-- [ ] 5.2 RED: fragment-key encode/decode test (`#k=base64url(key)`) + Login-item heuristic.
-- [ ] 5.3 GREEN: `app/share-dialog.ts` (`Dialog<VaultItem, void>`, TTL `pl-select`, `SimpleContainer` encrypt, `pl-clipboard` copy) passes 5.2.
-- [ ] 5.4 GREEN: `app/share-view.ts`: anon pre-auth page, `peekShare` on connect (no burn), Reveal calls `revealShare`.
-- [ ] 5.5 REFACTOR: shared fragment-key parsing util; confirm `routing.ts` ignores hash.
-- [ ] 5.6 `app/app.ts`: register `"share"` page, pre-auth allow-list, exclude from `unlocked` gate.
+- [x] 5.1 `app/item-view.ts`: add "Share Link ..." action, enabled only for `FieldType.Password` items. (Req: Item-Type Scope)
+- [x] 5.2 RED: fragment-key encode/decode test (`#k=base64url(key)`) + Login-item heuristic.
+- [x] 5.3 GREEN: `app/share-dialog.ts` (`Dialog<VaultItem, void>`, TTL `pl-select`, `SimpleContainer` encrypt, `pl-clipboard` copy) passes 5.2.
+- [x] 5.4 GREEN: `app/share-view.ts`: anon pre-auth page, `peekShare` on connect (no burn), Reveal calls `revealShare`.
+- [x] 5.5 REFACTOR: shared fragment-key parsing util; confirm `routing.ts` ignores hash.
+- [x] 5.6 `app/app.ts`: register `"share"` page, pre-auth allow-list, exclude from `unlocked` gate.
 
 ## Phase 6: Testing - Integration & E2E
 

@@ -7,6 +7,7 @@ import { translate as $l } from "@padloc/locale/src/translate";
 import { AttachmentInfo } from "@padloc/core/src/attachment";
 import { parseURL } from "@padloc/core/src/otp";
 import { formatDateFromNow, formatDateTime } from "../lib/util";
+import { isShareableItem } from "../lib/share";
 import { alert, confirm, dialog } from "../lib/dialog";
 // import { animateCascade } from "../lib/animation";
 import { app, router } from "../globals";
@@ -22,6 +23,7 @@ import { FieldElement } from "./field";
 import "./field";
 import { GeneratorDialog } from "./generator-dialog";
 import { AttachmentDialog } from "./attachment-dialog";
+import { ShareDialog } from "./share-dialog";
 import { UploadDialog } from "./upload-dialog";
 import { QRDialog } from "./qr-dialog";
 import "./scroller";
@@ -105,6 +107,9 @@ export class ItemView extends Routing(StateMixin(LitElement)) {
 
     @dialog("pl-attachment-dialog")
     private _attachmentDialog: AttachmentDialog;
+
+    @dialog("pl-share-dialog")
+    private _shareDialog: ShareDialog;
 
     @dialog("pl-upload-dialog")
     private _uploadDialog: UploadDialog;
@@ -418,6 +423,7 @@ export class ItemView extends Routing(StateMixin(LitElement)) {
         const attachments = this._item!.attachments || [];
         const history = this._item!.history || [];
         const isFavorite = app.account!.favorites.has(this.itemId);
+        const shareable = isShareableItem(this._item!);
 
         const isExpired = this._isExpired();
         const isEditable = this._isEditable;
@@ -520,6 +526,14 @@ export class ItemView extends Routing(StateMixin(LitElement)) {
 
                         <pl-popover hide-on-click hide-on-leave alignment="bottom-left">
                             <pl-list>
+                                <div
+                                    class="small double-padded list-item center-aligning spacing horizontal layout hover click"
+                                    ?hidden=${!shareable}
+                                    @click=${this._share}
+                                >
+                                    <pl-icon icon="unlock"></pl-icon>
+                                    <div class="ellipsis">${$l("Share Link ...")}</div>
+                                </div>
                                 <div
                                     class="small double-padded list-item center-aligning spacing horizontal layout hover click"
                                     @click=${this._move}
@@ -904,6 +918,13 @@ export class ItemView extends Routing(StateMixin(LitElement)) {
                 this.go(`items/${movedItems[0].id}`, undefined, true, true);
             }
         }
+    }
+
+    private async _share() {
+        if (!this._item || !isShareableItem(this._item)) {
+            return;
+        }
+        await this._shareDialog.show(this._item);
     }
 
     private async _generateValue(index: number) {
