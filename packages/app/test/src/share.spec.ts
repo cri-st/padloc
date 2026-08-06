@@ -21,6 +21,7 @@
 import { Field, FieldType, VaultItem } from "@padloc/core/src/item";
 import {
     buildShareableItem,
+    computeDefaultSelectedFieldIndices,
     decodeShareKeyFragment,
     encodeShareKeyFragment,
     isFieldSelectedByDefault,
@@ -168,6 +169,59 @@ console.log("\n[Minimal shared item construction]");
     ok(shared.history.length === 0, "shared item NEVER carries edit history");
     ok(shared.attachments.length === 0, "shared item NEVER carries attachments");
     ok(shared.tags.length === 0, "shared item NEVER carries tags");
+}
+
+// ── Default selection only claims the FIRST field per type ─────────────────
+console.log("\n[Default selection only claims the FIRST field per type]");
+{
+    // Reproduces a real report: a second Url-typed field named "Backup
+    // codes" (e.g. from an import that mistyped it, or a user repurposing
+    // the Url field type) must NOT be pre-selected just because its type
+    // matches the safe default list -- only the item's actual/first URL
+    // field should be.
+    const username = new Field({ name: "UserName", type: FieldType.Username, value: "alice" });
+    const password = new Field({ name: "Password", type: FieldType.Password, value: "hunter2" });
+    const url = new Field({ name: "URL", type: FieldType.Url, value: "https://example.com" });
+    const backupCodes = new Field({ name: "Backup codes", type: FieldType.Url, value: "1234-5678, 8765-4321" });
+    const textBackupCode = new Field({ name: "whiteout_backup code", type: FieldType.Text, value: "abcd" });
+
+    const fields = [username, password, url, backupCodes, textBackupCode];
+    const defaultIndices = computeDefaultSelectedFieldIndices(fields);
+
+    ok(defaultIndices.has(0), "UserName (1st Username field) is selected by default");
+    ok(defaultIndices.has(1), "Password (1st Password field) is selected by default");
+    ok(defaultIndices.has(2), "URL (1st Url field) is selected by default");
+    ok(!defaultIndices.has(3), "Backup codes (2nd Url field) is NOT selected by default, even though its type matches");
+    ok(!defaultIndices.has(4), "whiteout_backup code (Text field) is NOT selected by default");
+    ok(defaultIndices.size === 3, "exactly 3 fields are pre-selected -- one per safe type, no duplicates");
+
+    // A field is still fully selectable manually -- this test only asserts
+    // the DEFAULT, not that "Backup codes" is excluded from the dialog.
+    ok(isFieldShareable(backupCodes) === true, "Backup codes remains a selectable option in the dialog");
+}
+
+// ── Duplicate Password-type fields (real report: "Facebook (Crist)") ───────
+console.log('\n[Duplicate Password-type fields, real report: "Facebook (Crist)"]');
+{
+    const username = new Field({ name: "UserName", type: FieldType.Username, value: "crist" });
+    const password = new Field({ name: "Password", type: FieldType.Password, value: "hunter2" });
+    const url = new Field({ name: "URL", type: FieldType.Url, value: "https://facebook.com" });
+    const securityPassword = new Field({ name: "Seguridad_Password", type: FieldType.Password, value: "sec1" });
+    const securityPasswordSpaces = new Field({
+        name: "Seguridad_Password with spaces",
+        type: FieldType.Password,
+        value: "sec 2",
+    });
+
+    const fields = [username, password, url, securityPassword, securityPasswordSpaces];
+    const defaultIndices = computeDefaultSelectedFieldIndices(fields);
+
+    ok(defaultIndices.has(0), "UserName is selected by default");
+    ok(defaultIndices.has(1), "the FIRST Password field (canonical 'Password') is selected by default");
+    ok(defaultIndices.has(2), "URL is selected by default");
+    ok(!defaultIndices.has(3), "Seguridad_Password (2nd Password field) is NOT selected by default");
+    ok(!defaultIndices.has(4), "Seguridad_Password with spaces (3rd Password field) is NOT selected by default");
+    ok(defaultIndices.size === 3, "exactly 3 fields pre-selected, regardless of how many extra Password fields exist");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

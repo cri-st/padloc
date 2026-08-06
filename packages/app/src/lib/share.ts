@@ -85,6 +85,31 @@ export function isFieldSelectedByDefault(field: Pick<Field, "type">): boolean {
 }
 
 /**
+ * Computes which field indices should be pre-selected when opening the
+ * share dialog: only the FIRST field of each default-shareable type
+ * (Username, Password, Url, Email) -- matching an item's actual core
+ * Login template fields. Any LATER field that happens to share one of
+ * those types (e.g. a second Url-typed field a user repurposed for
+ * something else, like backup codes, or an importer mis-typed) is left
+ * unchecked: it stays fully selectable in the dialog, it's just not
+ * assumed safe by default merely because its `type` matches.
+ */
+export function computeDefaultSelectedFieldIndices(fields: Field[]): Set<number> {
+    const claimedTypes = new Set<FieldType>();
+    const selected = new Set<number>();
+
+    fields.forEach((field, index) => {
+        if (!isFieldShareable(field) || !isFieldSelectedByDefault(field) || claimedTypes.has(field.type)) {
+            return;
+        }
+        claimedTypes.add(field.type);
+        selected.add(index);
+    });
+
+    return selected;
+}
+
+/**
  * Builds the minimal item that actually gets encrypted and shared -- a
  * FRESH `VaultItem` containing only `name` and the caller-selected
  * fields. Deliberately never a copy or mutation of the source item, so

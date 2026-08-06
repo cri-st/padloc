@@ -10,8 +10,8 @@ import { formatDateFromNow } from "../lib/util";
 import { setClipboard } from "../lib/clipboard";
 import {
     buildShareableItem,
+    computeDefaultSelectedFieldIndices,
     encodeShareKeyFragment,
-    isFieldSelectedByDefault,
     isFieldShareable,
     isShareableItem,
 } from "../lib/share";
@@ -65,14 +65,7 @@ export class ShareDialog extends Dialog<VaultItem, void> {
         this._item = item;
         this._link = "";
         this._expiresAt = null;
-        this._selectedFieldIndices = new Set(
-            item.fields.reduce<number[]>((indices, field, index) => {
-                if (isFieldShareable(field) && isFieldSelectedByDefault(field)) {
-                    indices.push(index);
-                }
-                return indices;
-            }, [])
-        );
+        this._selectedFieldIndices = computeDefaultSelectedFieldIndices(item.fields);
         await this.updateComplete;
         this._ttlSelect.value = ONE_DAY;
         return super.show(item);

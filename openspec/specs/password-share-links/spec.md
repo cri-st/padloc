@@ -27,7 +27,7 @@ Authenticated sender MUST create shares for Login items only. Client MUST AES-25
 
 ### Requirement: Field Selection Scope
 
-The share dialog MUST let the sender choose which of the item's fields are included in the share, rather than always sharing the whole item. A `Totp` field MUST NEVER be offered as selectable -- it is excluded from the field list entirely, not merely unchecked. Fields of type Username, Password, Url, and Email MUST be selected by default; all other selectable field types (e.g. Note, Pin, Text) MUST start unchecked. The shared payload MUST NEVER include the item's `passkeys`, `history`, `attachments`, or `tags`, regardless of field selection.
+The share dialog MUST let the sender choose which of the item's fields are included in the share, rather than always sharing the whole item. A `Totp` field MUST NEVER be offered as selectable -- it is excluded from the field list entirely, not merely unchecked. Default selection MUST be by field TYPE, not merely by count: only the FIRST field of each default-shareable type (Username, Password, Url, Email) is pre-checked. Any additional field sharing one of those types (e.g. a second Url field repurposed for something else, or a duplicate/renamed Password field) MUST start unchecked -- it remains fully selectable, just not assumed safe by default. All other selectable field types (e.g. Note, Pin, Text) MUST also start unchecked. The shared payload MUST NEVER include the item's `passkeys`, `history`, `attachments`, or `tags`, regardless of field selection.
 
 #### Scenario: TOTP field is never offered
 - GIVEN a Login item has a Totp field
@@ -38,6 +38,11 @@ The share dialog MUST let the sender choose which of the item's fields are inclu
 - GIVEN a Login item has Username, Password, Url, and Note fields
 - WHEN the sender opens the share dialog
 - THEN Username, Password, and Url MUST be pre-checked; Note MUST be unchecked
+
+#### Scenario: Only the first field of a duplicated safe type is pre-selected
+- GIVEN a Login item has one Username field, one canonical Password field, and two MORE fields also typed Password (e.g. "Seguridad_Password", "Seguridad_Password with spaces")
+- WHEN the sender opens the share dialog
+- THEN only Username and the FIRST Password field are pre-checked; the extra Password-typed fields start unchecked
 
 #### Scenario: Sender narrows or widens the shared fields
 - GIVEN the default selection is shown
