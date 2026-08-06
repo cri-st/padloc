@@ -57,6 +57,18 @@ export class OauthClient implements AuthClient {
             }, 1000);
 
             messageHandler = (e: MessageEvent<{ type: string; url: string }>) => {
+                // SECURITY: without these two checks, ANY window holding a
+                // reference to this one (e.g. a malicious page opened via
+                // `window.open()` from — or that itself opened — this app)
+                // could `postMessage({type:'padloc_oauth_redirect', url:
+                // 'https://attacker/?code=...&state=...'}, '*')` and have
+                // it accepted as the real OAuth provider response. The
+                // legitimate sender (packages/admin/src/app.ts) always
+                // targets `window.location.origin` and is literally the
+                // popup this code opened, so both must match here too.
+                if (e.origin !== window.location.origin || e.source !== authWindow) {
+                    return;
+                }
                 if (e.data?.type !== "padloc_oauth_redirect") {
                     return;
                 }
@@ -66,8 +78,6 @@ export class OauthClient implements AuthClient {
                     const error = params.get("error");
                     const code = params.get("code");
                     const state = params.get("state");
-
-                    console.log("message received", url);
 
                     if (error) {
                         reject(error);

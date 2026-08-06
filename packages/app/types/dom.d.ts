@@ -3,8 +3,6 @@ interface Navigator {
 }
 
 interface Window {
-    app: any;
     router: any;
     extension: any;
-    getPlatform: any;
 }
