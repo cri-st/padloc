@@ -233,6 +233,28 @@ export class WorkerReceiver implements Receiver {
     }
 }
 
+/**
+ * Transport-level request-age check, intended as an EARLY defense against
+ * replaying a captured request body. Currently a permanent no-op for every
+ * real client: `rawRequest.time` is a TOP-LEVEL field this function reads,
+ * but `@padloc/core`'s `Request` class never populates one -- only the
+ * NESTED `RequestAuthentication.time` exists, which `Controller.
+ * authenticate()` already separately validates (`server.ts`'s `age >
+ * this.config.maxRequestAge` check) for AUTHENTICATED requests.
+ *
+ * Left as an honest no-op rather than removed or silently "fixed" by
+ * wiring a new top-level `time` field, which would be a wire-format
+ * change affecting every RPC call, not a share-specific fix. For the two
+ * anonymous share-view methods this gap covers (peekShare/revealShare,
+ * which have no `auth` block and therefore no age check at all), the
+ * DO's own atomic one-time-view flag already fully subsumes what a
+ * request-age check would add: a replayed `revealShare` call is
+ * indistinguishable from a fresh one, and the DO correctly allows exactly
+ * one to succeed regardless of the elapsed time between them. Revisit
+ * only alongside a deliberate, reviewed wire-format change if a future
+ * anonymous RPC method needs stronger replay protection than a one-time
+ * consumption flag.
+ */
 function validateRequestAge(rawRequest: Record<string, unknown>, config: WorkerReceiverConfig): boolean {
     const requestTime = rawRequest.time as number | undefined;
     if (!requestTime) return true;
