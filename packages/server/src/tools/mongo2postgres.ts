@@ -20,18 +20,25 @@ function getMongoClient(config: MongoDBStorageConfig) {
 }
 
 function getPostgresPool(config: PostgresConfig) {
-    const { host, user, password, port, database, tls, tlsCAFile } = config;
+    const { host, user, password, port, database, tls, tlsCAFile, tlsCAFileContents, tlsRejectUnauthorized } = config;
     const tlsCAFilePath = tlsCAFile && resolve(process.cwd(), tlsCAFile);
-    const ca = tlsCAFilePath && readFileSync(tlsCAFilePath).toString();
+    const ca = tlsCAFileContents || (tlsCAFilePath && readFileSync(tlsCAFilePath).toString());
     return new Pool({
         host,
         user,
         password,
         port,
         database,
+        // SECURITY: mirrors `storage/postgres.ts`'s real backend -- this
+        // one-shot migration tool previously hardcoded
+        // `rejectUnauthorized: false` regardless of the operator's
+        // `tlsRejectUnauthorized` config (which already defaults to
+        // `true`), silently accepting any TLS certificate (including a
+        // MITM'd one) for the Postgres connection this tool writes every
+        // migrated account/vault/org to.
         ssl: tls
             ? {
-                  rejectUnauthorized: false,
+                  rejectUnauthorized: tlsRejectUnauthorized,
                   ca,
               }
             : undefined,

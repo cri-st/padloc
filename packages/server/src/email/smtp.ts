@@ -90,8 +90,17 @@ export class SMTPSender implements Messenger {
             title: message.title,
             ...message.data,
         })) {
-            html = html.replace(new RegExp(`{{ ?${name} ?}}`, "gi"), dompurify.sanitize(value));
-            text = text.replace(new RegExp(`{{ ?${name} ?}}`, "gi"), value);
+            // SECURITY: a replacer FUNCTION, not a replacer STRING --
+            // `String.replace` interprets special patterns (`$&`, `$1`,
+            // `$$`, `$'`, ...) inside a STRING replacement value. Several
+            // of these values (title, org/invite names, emails) can
+            // contain client-controlled text; a value containing e.g. `$&`
+            // would have silently duplicated the matched placeholder in
+            // the rendered template instead of inserting the literal
+            // value. Replacer functions never receive this special-
+            // pattern treatment.
+            html = html.replace(new RegExp(`{{ ?${name} ?}}`, "gi"), () => dompurify.sanitize(value));
+            text = text.replace(new RegExp(`{{ ?${name} ?}}`, "gi"), () => value);
         }
 
         return { html, text };
