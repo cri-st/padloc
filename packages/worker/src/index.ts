@@ -205,6 +205,17 @@ export default {
         // binding is optional (falls back to always-allow, same as every
         // other optional binding in this file) so deployments that haven't
         // added the migration yet degrade safely rather than 500ing.
+        // SECURITY: unlike the `ACCOUNT_LOCK` binding (see
+        // `server-factory.ts`'s matching check), a missing rate-limit DO
+        // binding previously failed open with ZERO operator telemetry --
+        // brute-force throttling silently vanishes and nobody finds out
+        // until it's exploited. Reported the same way here.
+        if (!env.GENERAL_RATE_LIMIT && (env.HQ_ENVIRONMENT === "production" || env.HQ_ENVIRONMENT === "staging")) {
+            captureHqException(
+                new Error(`GENERAL_RATE_LIMIT durable object binding missing in ${env.HQ_ENVIRONMENT}`),
+                { ...requestAttributes(request), "padloc.error.code": "general_rate_limit_binding_missing" }
+            );
+        }
         // SECURITY: validated instead of a bare Number(...) -- an invalid
         // (non-numeric) env var value produces NaN, and NaN comparisons
         // are always false, which silently disabled rate limiting
@@ -220,6 +231,15 @@ export default {
         // is optional (falls back to always-allow, same as every other
         // optional binding in this file) so deployments that haven't
         // added the migration yet degrade safely rather than 500ing.
+        // SECURITY: same fail-open-without-telemetry gap as
+        // `GENERAL_RATE_LIMIT` above -- alert an operator instead of
+        // silently running with the anonymous share-view throttle off.
+        if (!env.SHARE_VIEW_RATE_LIMIT && (env.HQ_ENVIRONMENT === "production" || env.HQ_ENVIRONMENT === "staging")) {
+            captureHqException(
+                new Error(`SHARE_VIEW_RATE_LIMIT durable object binding missing in ${env.HQ_ENVIRONMENT}`),
+                { ...requestAttributes(request), "padloc.error.code": "share_view_rate_limit_binding_missing" }
+            );
+        }
         const shareViewRateLimiter = new DurableObjectRateLimiter(env.SHARE_VIEW_RATE_LIMIT, {
             maxRequests: 10,
             windowMs: 60_000,
