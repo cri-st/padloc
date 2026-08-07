@@ -61,9 +61,11 @@ Continuation of the `sec-expert` engagement (Round 1 archived at `openspec/chang
 
 ## Session Lifecycle Integrity (security-baseline Req. 9, new in Round 2) — full posture confirmed
 
-- Logout (`revokeSession`) → server-side invalidation confirmed (deletes the `Session` storage record; every request re-checks `storage.get(Session, id)`, immediately rejects a deleted session).
-- Full account recovery (`recoverAccount`) → confirmed, revokes ALL sessions.
-- Password change (`updateAuth` with a new `verifier`) → **was missing, now fixed** (R2-H3 above): revokes all OTHER sessions, preserves the current one.
+- Logout (`revokeSession`) → server-side invalidation confirmed (deletes the `Session` storage record; every request re-checks `storage.get(Session, id)`, immediately rejects a deleted session). **Persisted regression coverage**: `packages/worker/test/auth-flow-e2e.worker.ts` ("Revoked session rejected", via `run-auth-flow-e2e.mjs`), now wired into `npm run test:ci` (`test:auth-flow-e2e`) — previously existed but was never wired into any `package.json` script and had no evidence it actually ran to completion in a fresh environment; the runner was also missing the `--persist-to` + D1 migration steps every other worker e2e runner uses, so it only happened to pass locally against leftover dev-server D1 state. Both gaps are now closed.
+- Full account recovery (`recoverAccount`) → confirmed, revokes ALL sessions. No persisted e2e regression test yet for the recovery-specific session-revocation path — **documented gap for a future round** (out of scope for this session, pre-existing Round 1 code, unmodified in Round 2).
+- Password change (`updateAuth` with a new `verifier`) → **was missing, now fixed** (R2-H3 above): revokes all OTHER sessions, preserves the current one. The original verification for this fix was a disposable ad-hoc script, not persisted in the tree. **Persisted regression coverage added**: two new scenarios in `packages/worker/test/auth-flow-e2e.worker.ts`, run via `run-auth-flow-e2e.mjs` (real `wrangler dev` instance, real SRP handshakes, no mocks), wired into `npm run test:ci`:
+  - `"Password change revokes other sessions but not the changing session"` — creates an account with two independent real sessions (A, B), confirms both authenticate, changes the password via session A's `updateAuth`, confirms session B's next request now fails with `INVALID_SESSION`/`NOT_FOUND`/`SESSION_EXPIRED`, and confirms session A still succeeds.
+  - `"Password change with only one active session leaves it unaffected"` — single-session case: confirms the session that performs its own password change keeps working afterward when there is nothing else to revoke.
 - MFA enrollment/removal → does not revoke sessions — **documented accepted-risk** (additive action, not a compromise-recovery event, consistent with OWASP guidance which scopes this control to credential-reset events).
 
 ## Coverage Check

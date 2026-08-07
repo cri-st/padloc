@@ -8,6 +8,10 @@
  *   - Wrong password rejection
  *   - Non-existent account login rejection
  *   - Revoked session rejection
+ *   - Password change revokes other sessions but keeps the changing session
+ *     (regression coverage for server.ts's updateAuth())
+ *   - Password change with a single active session leaves it unaffected
+ *   - TOTP MFA registration/auth-request/replay-protection
  *
  * Note: EMAIL_VERIFY_ON_SIGNUP=false in dev env, so account creation bypasses
  * email verification. The SRP key exchange remains fully exercised.
@@ -39,6 +43,7 @@ import {
     CompleteRegisterMFAuthenticatorParams,
     StartAuthRequestParams,
     CompleteAuthRequestParams,
+    UpdateAuthParams,
 } from "@padloc/core/src/api";
 import { marshal, unmarshal, bytesToBase32, base32ToBytes } from "@padloc/core/src/encoding";
 import { AccountLockDO } from "../src/locks/account-lock";
@@ -171,6 +176,40 @@ async function createAccountAndLogin(
         sessionKey: session.key,
         client,
     };
+}
+
+/**
+ * Log in to an EXISTING account using the real SRP flow (mirrors the login
+ * half of createAccountAndLogin). Used to establish a SECOND independent
+ * session for an account that has already signed up, e.g. to test that a
+ * password change on one session revokes sibling sessions.
+ */
+async function login(email: string, password: string): Promise<{ client: Client }> {
+    const client = await createClient();
+
+    const startRes = await client.startCreateSession(new StartCreateSessionParams({ email }));
+
+    const loginAuth = new Auth(email);
+    loginAuth.keyParams = startRes.keyParams;
+    const loginAuthKey = await loginAuth.getAuthKey(password);
+    const loginSrp = new SRPClient();
+    await loginSrp.initialize(loginAuthKey);
+    await loginSrp.setB(startRes.B);
+
+    const session = await client.completeCreateSession(
+        new CompleteCreateSessionParams({
+            accountId: startRes.accountId,
+            srpId: startRes.srpId,
+            A: loginSrp.A!,
+            M: loginSrp.M1!,
+            addTrustedDevice: false,
+        })
+    );
+
+    session.key = loginSrp.K!;
+    client.state.session = session;
+
+    return { client };
 }
 
 interface TestResult {
@@ -347,6 +386,109 @@ async function runTests(): Promise<TestResult[]> {
                     lastError instanceof Err ? lastError.code : String(lastError)
                 }`
             );
+    });
+
+    // ── Test 5b: Password change revokes OTHER sessions, keeps the changing one ──
+    // Regression coverage for server.ts's updateAuth(): a verifier change is a
+    // credential change, so every session other than the one that proved
+    // possession of the new credential must be revoked immediately.
+    await test("Password change revokes other sessions but not the changing session", async () => {
+        const email = `pw-change-multi-${await uuid()}@test.padloc.app`;
+        const oldPassword = "OldPassword123!";
+        const newPassword = "NewPassword456!";
+
+        // Session A: signup + login.
+        const { client: clientA } = await createAccountAndLogin(email, oldPassword);
+
+        // Session B: independent second login to the same account.
+        const { client: clientB } = await login(email, oldPassword);
+
+        // Both sessions must authenticate successfully before the change.
+        const accountA = await clientA.getAccount();
+        const accountB = await clientB.getAccount();
+        if (accountA.email !== email || accountB.email !== email) {
+            throw new Error("Sanity check failed: both sessions should authenticate before the password change");
+        }
+
+        // Change password via session A (mirrors App.changePassword's updateAuth call).
+        const newAuth = new Auth(email);
+        newAuth.keyParams.iterations = PBKDF2_ITER_MIN;
+        const newAuthKey = await newAuth.getAuthKey(newPassword);
+        const newSrp = new SRPClient();
+        await newSrp.initialize(newAuthKey);
+        newAuth.verifier = newSrp.v!;
+
+        await clientA.updateAuth(
+            new UpdateAuthParams({
+                verifier: newAuth.verifier,
+                keyParams: newAuth.keyParams,
+            })
+        );
+
+        // Session B must now be rejected -- its session record was revoked.
+        let sessionBRejected = false;
+        let lastError: unknown;
+        try {
+            await clientB.getAccount();
+        } catch (err: unknown) {
+            lastError = err;
+            if (
+                err instanceof Err &&
+                (err.code === ErrorCode.INVALID_SESSION ||
+                    err.code === ErrorCode.NOT_FOUND ||
+                    err.code === ErrorCode.SESSION_EXPIRED)
+            ) {
+                sessionBRejected = true;
+            }
+        }
+        if (!sessionBRejected) {
+            throw new Error(
+                `Session B was not revoked after password change via session A. Error: ${
+                    lastError instanceof Err ? lastError.code : String(lastError)
+                }`
+            );
+        }
+
+        // Session A -- the one that performed the change -- must still work.
+        const accountAAfter = await clientA.getAccount();
+        if (accountAAfter.email !== email) {
+            throw new Error("Session A (the changing session) was unexpectedly invalidated");
+        }
+    });
+
+    // ── Test 5c: Password change with a single active session leaves it intact ──
+    await test("Password change with only one active session leaves it unaffected", async () => {
+        const email = `pw-change-single-${await uuid()}@test.padloc.app`;
+        const oldPassword = "OldPassword123!";
+        const newPassword = "NewPassword456!";
+
+        const { client } = await createAccountAndLogin(email, oldPassword);
+
+        const before = await client.getAccount();
+        if (before.email !== email) {
+            throw new Error("Sanity check failed: session should authenticate before the password change");
+        }
+
+        const newAuth = new Auth(email);
+        newAuth.keyParams.iterations = PBKDF2_ITER_MIN;
+        const newAuthKey = await newAuth.getAuthKey(newPassword);
+        const newSrp = new SRPClient();
+        await newSrp.initialize(newAuthKey);
+        newAuth.verifier = newSrp.v!;
+
+        await client.updateAuth(
+            new UpdateAuthParams({
+                verifier: newAuth.verifier,
+                keyParams: newAuth.keyParams,
+            })
+        );
+
+        // With no sibling sessions to revoke, the session that performed the
+        // change must still work afterward.
+        const after = await client.getAccount();
+        if (after.email !== email) {
+            throw new Error("Single active session was unexpectedly invalidated after its own password change");
+        }
     });
 
     // ── TOTP MFA Tests ──
