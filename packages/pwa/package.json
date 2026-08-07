@@ -20,6 +20,7 @@
         "npm": "11.x"
     },
     "devDependencies": {
+        "@types/trusted-types": "2.0.7",
         "clean-webpack-plugin": "3.0.0",
         "css-loader": "5.2.6",
         "file-loader": "6.2.0",
