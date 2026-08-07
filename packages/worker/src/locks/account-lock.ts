@@ -92,6 +92,26 @@ export class AccountLockDO extends DurableObject<Env> {
         release();
     }
 
+    /**
+     * Extends the current holder's TTL without re-queuing (unlike calling
+     * `acquire()` again, which would push the caller to the BACK of its
+     * own queue and self-deadlock). Returns `false` (no-op) if `jobId` is
+     * not the current holder -- e.g. it already lost the lock to the TTL
+     * safety valve, or was never the holder to begin with.
+     */
+    async renew(jobId: string, ttlMs: number): Promise<boolean> {
+        if (this._holder !== jobId) {
+            return false;
+        }
+        clearTimeout(this._timer);
+        this._timer = setTimeout(() => {
+            if (this._holder === jobId) {
+                this.release();
+            }
+        }, ttlMs);
+        return true;
+    }
+
     /** Returns the current holder's jobId or null. */
     async getHolder(): Promise<string | null> {
         return this._holder;
@@ -121,9 +141,20 @@ interface LockTicket {
     release(): Promise<void>;
 }
 
+/**
+ * Fixed safety-valve TTL: auto-releases a holder that crashes/gets
+ * evicted without calling `release()`. Kept short (rather than simply
+ * lengthened) via heartbeat renewal in `acquireLock` below -- a longer
+ * fixed TTL would slow recovery from a genuinely abandoned lock, while a
+ * short TTL alone reintroduces the exact race this DO exists to prevent
+ * for a legitimately slow-but-alive holder under contention.
+ */
+const ACCOUNT_LOCK_TTL_MS = 30_000;
+
 /** Stub returned by DurableObjectNamespace.get() for AccountLockDO. */
 interface AccountLockStub {
     acquire(jobId: string, ttlMs: number): Promise<void>;
+    renew(jobId: string, ttlMs: number): Promise<boolean>;
     release(): Promise<void>;
     getHolder(): Promise<string | null>;
 }
@@ -139,9 +170,26 @@ async function acquireLock(id: string, lockNamespace: DurableObjectNamespace): P
     // any current or future caller passes in.
     const key = id.trim().toLowerCase();
     const stub = lockNamespace.get(lockNamespace.idFromName(key)) as unknown as AccountLockStub;
-    await stub.acquire(key, 30_000);
+    await stub.acquire(key, ACCOUNT_LOCK_TTL_MS);
+
+    // M7 fix: a FIXED TTL alone auto-releases a still-running holder
+    // under contention (cold start, queued critical-section work),
+    // silently letting a second caller acquire the "same" logical lock
+    // and reintroducing the exact race this DO exists to prevent.
+    // Heartbeat renewal at 1/3 of the TTL keeps a genuinely alive
+    // holder's lock from expiring while preserving the safety valve: if
+    // the holder's own execution context is gone (crash/eviction),
+    // renewal simply stops firing and the DO's own timer still reclaims
+    // the lock after one more TTL window.
+    const heartbeat = setInterval(() => {
+        stub.renew(key, ACCOUNT_LOCK_TTL_MS).catch(() => {});
+    }, ACCOUNT_LOCK_TTL_MS / 3);
+
     return {
-        release: () => stub.release(),
+        release: async () => {
+            clearInterval(heartbeat);
+            await stub.release();
+        },
     };
 }
 

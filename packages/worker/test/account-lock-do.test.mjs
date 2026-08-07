@@ -29,6 +29,8 @@
  *      settle -- no deadlock -- and run in strict FIFO order, never
  *      overlapping.
  *   3. TTL auto-release fires if a holder never calls release().
+ *   4. renew() extends the TTL past the original window for the current
+ *      holder (M7 fix), and is a no-op for any other jobId.
  *
  * Run: node test/account-lock-do.test.mjs
  */
@@ -175,6 +177,44 @@ async function testTtlAutoRelease() {
     assert((await lock.getHolder()) === "next-job", "holder is next-job after TTL freed the stuck holder");
 }
 
+async function testRenewExtendsTtlPastOriginalWindow() {
+    console.log("\nrenew() heartbeat extends TTL:");
+    const lock = new AccountLockDO(makeState(), {});
+
+    await lock.acquire("slow-job", 100);
+    // Without renewal, "slow-job" would auto-release at ~100ms. Renew
+    // partway through with a fresh 300ms window, mirroring
+    // `acquireLock`'s periodic heartbeat while a real caller's work is
+    // still running.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const renewed = await lock.renew("slow-job", 300);
+    assert(renewed === true, "renew() succeeds for the current holder");
+
+    // Wait past the ORIGINAL 100ms TTL (now 160ms elapsed total) -- the
+    // lock must still be held because renew() reset the timer.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert((await lock.getHolder()) === "slow-job", "holder survives past the original TTL after renewal");
+
+    // Wait past the RENEWED window too -- the safety valve must still
+    // fire eventually if the holder never releases.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert((await lock.getHolder()) === null, "the renewed TTL still auto-releases if never released");
+}
+
+async function testRenewNoOpForWrongHolder() {
+    console.log("\nrenew() rejects a stale/wrong holder:");
+    const lock = new AccountLockDO(makeState(), {});
+
+    await lock.acquire("real-holder", 20);
+    const renewedByImposter = await lock.renew("imposter", 30_000);
+    assert(renewedByImposter === false, "renew() returns false for a jobId that isn't the current holder");
+
+    // The imposter's failed renew() must not have disturbed the real
+    // holder's original short TTL.
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert((await lock.getHolder()) === null, "real holder's original TTL still auto-releases untouched");
+}
+
 // ─── Run ───────────────────────────────────────────────────────────────────
 
 (async () => {
@@ -182,6 +222,8 @@ async function testTtlAutoRelease() {
     await testSequentialAcquireRelease();
     await testConcurrentBurstNeverDeadlocksAndStaysOrdered();
     await testTtlAutoRelease();
+    await testRenewExtendsTtlPastOriginalWindow();
+    await testRenewNoOpForWrongHolder();
 
     console.log(`\nResults: ${passed} passed, ${failed} failed`);
     process.exit(failed > 0 ? 1 : 0);
