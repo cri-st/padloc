@@ -644,11 +644,21 @@ export class Controller extends API {
     }
 
     async updateAuth({ verifier, keyParams, mfaOrder }: UpdateAuthParams): Promise<void> {
-        const { auth } = this._requireAuth();
+        const { auth, session } = this._requireAuth();
 
         if (verifier) {
             auth.verifier = verifier;
             this.log("account.updatePassword");
+
+            // SECURITY: a password change is a credential change -- the caller
+            // proved possession of the new credential in this exact request, so
+            // this session is provably not the one being defended against.
+            // Revoke every OTHER active session (mirrors the delete-then-splice
+            // pattern used by revokeSession/recoverAccount above) so a stolen
+            // session token can't outlive its owner's password change.
+            const otherSessions = auth.sessions.filter((s) => s.id !== session.id);
+            await Promise.all(otherSessions.map((s) => this.storage.delete(Object.assign(new Session(), s))));
+            auth.sessions = auth.sessions.filter((s) => s.id === session.id);
         }
 
         if (keyParams) {
