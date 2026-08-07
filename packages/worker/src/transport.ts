@@ -44,6 +44,60 @@ function statusForError(err: Err): number {
     }
 }
 
+/**
+ * Reads a request body while enforcing `maxBytes` DURING the read, not
+ * after a full `request.text()` buffer already exists.
+ *
+ * M8 fix: the previous implementation called `request.text()`
+ * unconditionally and only measured/rejected the result afterward -- an
+ * unauthenticated caller could force the Worker to buffer an entire
+ * oversized body (up to the platform's own request-size ceiling, far
+ * larger than `maxRequestSize`) into memory before the rejection ever
+ * happened, a resource-amplification DoS gap. This reads the body
+ * stream in chunks, tracking a running total, and cancels the
+ * underlying reader (stopping the platform from delivering, and this
+ * function from buffering, any further bytes) the moment the total
+ * exceeds `maxBytes` -- capping worst-case buffered memory at roughly
+ * `maxBytes` plus one chunk, regardless of how large the caller's
+ * declared or actual body is.
+ *
+ * A `Content-Length` pre-check in `_handlePost` (below) additionally
+ * short-circuits the common case -- a truthful, oversized declared
+ * length -- without reading any body bytes at all; that header is
+ * caller-supplied and can be absent (chunked transfer) or understated,
+ * so this streaming check is the actual enforcement backstop.
+ */
+async function readBodyWithLimit(request: globalThis.Request, maxBytes: number): Promise<string> {
+    if (!request.body) {
+        return "";
+    }
+    const reader = request.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+            break;
+        }
+        total += value.byteLength;
+        if (total > maxBytes) {
+            await reader.cancel();
+            throw new Err(
+                ErrorCode.MAX_REQUEST_SIZE_EXCEEDED,
+                `Request body exceeds maximum size of ${maxBytes} bytes`
+            );
+        }
+        chunks.push(value);
+    }
+    const combined = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+        combined.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return new TextDecoder().decode(combined);
+}
+
 export class WorkerReceiverConfig {
     allowOrigin: string = "*";
     maxRequestSize: number = DEFAULT_MAX_REQUEST_SIZE;
@@ -132,15 +186,27 @@ export class WorkerReceiver implements Receiver {
             }
         }
 
-        const bodyText = await request.text();
-
-        const byteLength = new TextEncoder().encode(bodyText).byteLength;
-        if (byteLength > this.config.maxRequestSize) {
+        // Fast path: a truthful, oversized declared Content-Length rejects
+        // without reading any body bytes at all. Caller-supplied and thus
+        // not trustworthy alone (absent for chunked transfer, or
+        // understated) -- `readBodyWithLimit` below is the real backstop.
+        const declaredLength = Number(request.headers.get("content-length"));
+        if (Number.isFinite(declaredLength) && declaredLength > this.config.maxRequestSize) {
             const err = new Err(
                 ErrorCode.MAX_REQUEST_SIZE_EXCEEDED,
                 `Request body exceeds maximum size of ${this.config.maxRequestSize} bytes`
             );
             return errorResponse(err, allowOrigin);
+        }
+
+        let bodyText: string;
+        try {
+            bodyText = await readBodyWithLimit(request, this.config.maxRequestSize);
+        } catch (e) {
+            if (e instanceof Err && e.code === ErrorCode.MAX_REQUEST_SIZE_EXCEEDED) {
+                return errorResponse(e, allowOrigin);
+            }
+            throw e;
         }
 
         let req: Request;
