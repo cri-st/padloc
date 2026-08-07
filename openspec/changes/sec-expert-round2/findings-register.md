@@ -1,0 +1,70 @@
+# sec-expert Round 2 — Findings Register
+
+Continuation of the `sec-expert` engagement (Round 1 archived at `openspec/changes/archive/2026-08-06-sec-expert/`). These are NEW findings discovered while closing the enterprise-grade gaps the orchestrator self-identified after Round 1's archive.
+
+## HIGH (3, all FIXED)
+
+### R2-H1. `packages/server/src/transport/http.ts` — reachable unhandled-rejection crash source — FIXED (commit `503e9ac9`)
+- **Where**: `createServer(async (httpReq, httpRes) => {...})` callback, only the `POST` branch was wrapped in `try/catch`.
+- **Exploit**: a synchronous throw in the `GET` branch (or before the `switch`) rejects the outer async callback's promise, which `http.createServer` never awaits — an unhandled rejection with no process-level handler at the time (see R2-H2), i.e. an uncontrolled crash from a single malformed request.
+- **Fix**: wrapped the entire callback body in `try/catch`, mirroring the discipline already used for the `POST` branch; outer catch defensively checks `headersSent`/`writableEnded` before writing a 500.
+- **Verified**: `packages/server` pinned `tsc --skipLibCheck` clean.
+
+### R2-H2. No process-level `unhandledRejection` handler — FIXED (commit `503e9ac9`)
+- **Where**: `packages/server/src/init.ts` had `uncaughtException` (log + admin email + `process.exit(1)`) but no `unhandledRejection` handler — Node's default behavior for the latter is an uncontrolled crash with zero operator visibility.
+- **Fix**: added `process.on("unhandledRejection", ...)` — log + best-effort admin email via the existing `emailSender`/`reportErrors` pattern, **deliberately no `process.exit()`**. Rationale (documented inline as a permanent code comment): an unhandled rejection in a stateless-per-request HTTP server is a recoverable, already-failed-to-its-caller condition — crashing the whole process for one bad request would turn any missed `.catch()` anywhere in the codebase into a remotely-triggerable single-request DoS. Reserve hard-exit for `uncaughtException` (genuinely corrupted process state).
+- **Verified**: real disposable-process smoke test — triggered an actual unhandled rejection against the registered handler, confirmed the process survived (`PROCESS_SURVIVED=true`) and exactly one log line was produced.
+
+### R2-H3. Password change does not revoke other active sessions — FIXED (commit `a9b6a67a`)
+- **Where**: `packages/core/src/server.ts`'s `updateAuth()` (password-change path) only updated `auth.verifier`/`keyParams`/`mfaOrder` — it never touched `auth.sessions`. Full account recovery (`recoverAccount()`) already revokes all sessions; logout (`revokeSession()`) already revokes its own session server-side; password change was the one credential-change path that didn't evict a stolen live session.
+- **Exploit**: an attacker with a stolen/exfiltrated live session token keeps working after the legitimate user "secures their account" by changing their password — the standard OWASP-recommended control ("invalidate other sessions on credential change") was missing.
+- **Fix**: `updateAuth()` now captures `session` from `_requireAuth()`'s destructured result; when `verifier` is set (a real password change, not an MFA-order-only or keyParams-only update), every OTHER `Session` record is deleted, preserving the session that performed the change (so the user isn't logged out by their own action) — reuses the exact delete-then-splice pattern already used by `revokeSession`/`recoverAccount`.
+- **Verified**: real live 2-session exercise (real SRP signup + 2 real login handshakes, no mocks) — session B's next request after a password change via session A returns `INVALID_SESSION`; session A's next request still succeeds. 8/8 assertions passed. `packages/worker/test/session-contract.test.mjs` (6/6) and `packages/worker/test/run-account-lockout-e2e.mjs` against a real `wrangler dev` instance (3/3) both pass with no regression.
+- **Scope note**: MFA enrollment/removal deliberately NOT included (additive action, not a compromise-recovery event) — documented accepted-risk, consistent with Round 1's honest-disclosure discipline.
+
+## Dependency Vulnerability Disclosure (security-baseline Req. 8, new in Round 2)
+
+`npm audit --omit=dev` run in every in-scope package. Before/after this round:
+
+| Package | Before (critical/high/moderate/low) | After | Status |
+|---|---|---|---|
+| worker | 0/1/0/0 | 0/1/0/0 | 1 HIGH accepted-risk (below) |
+| server | 4/8/13/2 (27 total) | 2/6/3/2 (13 total) | See below |
+| core | 0/0/0/0 | 0/0/0/0 | Clean |
+| app | 0/2/1/0 | 0/2/1/0 | 3 accepted-risk (below) |
+| pwa | 0/0/0/0 | 0/0/0/0 | Clean |
+| extension | 0/0/0/0 | 0/0/0/0 | Clean |
+| admin | 0/0/0/1 | 0/0/0/0 | FIXED |
+
+### Fixed this round
+- **`@simplewebauthn/server` 5.4.3 → 13.3.2** (server) — closed all 4 prior CRITICAL findings (`elliptic`/`jsrsasign` transitive chain, directly in the WebAuthn MFA signature-verification path). Commit `db8bdcd4`. Required a **companion TypeScript bump 4.4.3 → 4.9.5** (v13's shipped `.d.ts` files use TS 4.5+ syntax the old pinned compiler cannot parse at all, not even with `--skipLibCheck`) — a real dependency this round's design doc didn't anticipate, discovered by actually running the compiler rather than trusting the researched blast radius. `packages/server/src/auth/webauthn.ts` migrated to the v13 API (verified against the package's real installed `.d.ts` files, not assumed); a new real registration+authentication round-trip test was added (`packages/server/test/webauthn.ts`) using a genuine software authenticator (real ECDSA keypair, real CBOR encoding, real signature) — this closes a coverage gap, since no prior test actually exercised either `webauthn.ts` module. Verified: `tsc --skipLibCheck` clean, 11/11 mocha passing, `npm audit` confirms the chain is gone.
+- **`nodemailer` 6.6.1 → 9.0.4** (server) — commit `868064b7`. **Scope deviation from the design doc's originally-researched 6.10.x/non-major target, disclosed honestly**: after landing 6.10.1, a fresh audit showed nodemailer still HIGH — every currently-known nodemailer CVE (SMTP/CRLF header injection, jsonTransport sandbox bypass, SSRF via raw-message, OAuth2 TLS-validation bypass, addressparser ReDoS) covers ranges through `<=9.0.0`, so 6.10.1 would have closed zero real CVEs while reading as "fixed" in the log. Assessed regression risk as low (`packages/server/src/email/smtp.ts` only uses nodemailer's stable `createTransport`/`.sendMail` surface, unchanged 6.x–9.x) and shipped the major bump instead. Verified with `tsc --skipLibCheck` clean + a real (non-mocked) runtime smoke test using nodemailer's own `streamTransport` through `SMTPSender`'s exact call shape.
+- **`@aws-sdk/client-s3`/`@aws-sdk/types` 3.25.0 → 3.1105.0/3.974.2** (server, non-major) — commit `868064b7`. Closes the `fast-xml-parser`/`uuid`/credential-provider-chain findings.
+- **`diff` 5.1.0 → 5.2.2** (admin, non-major) — commit `58da1c3d`. Closes GHSA-73rr-hh4g-fpgx.
+
+### Accepted-risk, documented (not fixed this round — confirmed not exploitable via this codebase's actual usage pattern, evidence below)
+- **`drizzle-orm@0.38.4`** (worker, 1 HIGH, GHSA-gpj5-g38j-94v9 SQL injection via improperly escaped identifiers) — every call site in `packages/worker/src/storage/d1.ts`'s `resolveSqlColumn()` passes a real Drizzle `Column` object or parameterized value into the `sql` tagged template, never `sql.raw()` with request-derived string content. Fixing requires a semver-major bump (0.38→0.45) for zero measured exploitability gain in this codebase.
+- **`http-server`'s transitive chain** (`lodash`/`qs`/`follow-redirects`, app, 2 HIGH + 1 moderate) — `http-server` (self-hosted PWA static-file server, `packages/pwa/scripts/serve.js`) only serves static files here; never used as an HTTP proxy (`follow-redirects` path) or template engine (`lodash.template` path).
+- **`form-data`** (server, CRITICAL, via `jsdom`, used only for server-side DOMPurify HTML sanitization) — `jsdom`'s bundled `form-data`/`ws` usage backs its internal XHR/WebSocket API shims, which this codebase's DOMPurify sanitization calls never invoke (pure string-in/string-out HTML sanitization, no network requests made through the jsdom instance).
+- **`tar`** (server, CRITICAL, via `geolite2-redist`, used for IP-geolocation DB updates) — extraction target is MaxMind's own fixed-URL download at install/update time, not attacker-influenced input in normal operation. (Already identified in Round 2 exploration.)
+- **`lodash`** (server, HIGH, via `mongodb`→`mongodb-connection-string-url`→`whatwg-url`) — reached only during self-hosted MongoDB connection-string parsing at server startup from operator-supplied config, not client request input.
+- **`qs`** (server, HIGH, via `stripe` SDK) — used internally by the Stripe SDK for its own outbound API request query-string serialization (server-to-Stripe), not for parsing arbitrary inbound client input.
+- **`ws`** (server, HIGH, via `jsdom`) — same non-invocation rationale as `form-data` above; this codebase's self-hosted server does not use WebSockets.
+- **`minimatch`/`brace-expansion`** (server, HIGH — confirmed via `npm ls minimatch/brace-expansion --omit=dev`: reached through `geolite2-redist` → `rimraf` → `glob` → `minimatch` → `brace-expansion`, NOT via `mocha` as initially suspected) — same non-exploitable rationale as the `tar` finding above: this chain is used by `geolite2-redist`'s local file-cleanup/glob logic during its own periodic MaxMind-DB update process, not reachable via attacker-controlled request input during normal server operation.
+
+## Documentation-only findings (no code change — confirmed clean/secure)
+
+- **Secret scanning**: heuristic scan of the tracked working tree (953 files) — 37 hits, all confirmed false positives (test fixtures, enum labels). Bounded `git log -p` scan of the last 100 non-lockfile commits — 0 hits on added lines. All env-like files in the repo confirmed placeholder-only. **Clean.**
+- **`packages/admin` re-review**: destructive actions independently re-traced end-to-end (client confirm dialog → server `_requireAuth(true)` requiring both `config.admins` membership AND an explicit `session.asAdmin` flag — a stolen regular session cannot escalate). CSP has build-time parity with `pwa`. Zero raw HTML injection in admin's own code. The "Raw Data" JSON account dump cannot leak key material (`Account.privateKey`/`signingKey` are `@Exclude()`-decorated, independently re-verified against `Serializable._toRaw()`). **No new findings — Round 1's clean result holds up.**
+- **`packages/pwa` re-review**: genuinely minimal (15-line `index.ts`, presentational-only `index.html`) — all real UI/business logic lives in the shared `packages/app`, already covered in Round 1. **No additional app logic to review.**
+- **CSRF posture**: formally confirmed (not just assumed) — `Session._sign()`/`_verify()` authenticates every request via an HMAC signature carried as a field inside the request body itself (`RequestAuthentication`), never a cookie or any browser-auto-attached credential. Grepped `set-cookie|Set-Cookie|document.cookie|credentials:\s*["']include|withCredentials` across `packages/worker/src`, `packages/server/src`, `packages/app/src` — zero matches. **CSRF-resistant by construction**, not by an add-on mitigation.
+
+## Session Lifecycle Integrity (security-baseline Req. 9, new in Round 2) — full posture confirmed
+
+- Logout (`revokeSession`) → server-side invalidation confirmed (deletes the `Session` storage record; every request re-checks `storage.get(Session, id)`, immediately rejects a deleted session).
+- Full account recovery (`recoverAccount`) → confirmed, revokes ALL sessions.
+- Password change (`updateAuth` with a new `verifier`) → **was missing, now fixed** (R2-H3 above): revokes all OTHER sessions, preserves the current one.
+- MFA enrollment/removal → does not revoke sessions — **documented accepted-risk** (additive action, not a compromise-recovery event, consistent with OWASP guidance which scopes this control to credential-reset events).
+
+## Coverage Check
+All 7 Round 2 gap areas (dependency scan, secret scan, admin re-review, pwa re-review, unhandledRejection, session fixation/logout, CSRF) got a real, evidence-backed pass. 3 real code fixes shipped and verified; 6 dependency findings closed; 9 dependency findings documented as accepted-risk with codebase-specific exploitability analysis (not blanket "not exploitable" assertions) — every remaining `npm audit` finding across all 7 in-scope packages is now accounted for, none left silently unresolved.

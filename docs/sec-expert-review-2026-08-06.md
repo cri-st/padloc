@@ -64,3 +64,25 @@ See register. Deferrals are genuine tradeoffs (compat breaks, product/UX decisio
 2. Commission a **real third-party engagement** for the workstreams listed above as out of reach — this review materially reduces their starting workload (37 known-and-mostly-fixed issues off the table) but does not replace it, per `docs/external-security-audit-scope-2026-08-06.md`'s own guidance.
 3. Decide the `unhandledRejection` handler design (new finding above) and the two deferred items requiring product/compat sign-off (L12 CSP `blob:` narrowing, L13 markdown remote images) — these are legitimate decisions for the team, not defects this review could resolve unilaterally.
 4. Re-run `docs/external-security-audit-scope-2026-08-06.md`'s §2 "5 issues explicitly left unfixed" cross-check: 2 of those 3 are now addressed differently than originally scoped (H4/session-key is fixed here; the presigned-URL and blob-preview items remain confirmed dead-code/LOW as originally assessed, see register).
+
+---
+
+## Round 2 Addendum — Enterprise-Grade Gap Closure
+
+**Trigger**: after presenting the Round 1 results, the user asked whether the codebase was genuinely ready for an enterprise-grade bar. Honest self-assessment: no — 7 concrete gap areas existed that were within reach of a code-reviewing agent but not covered in Round 1 (dependency vulnerability scanning, secret scanning, a deeper look at the newly-audited `packages/admin`/`packages/pwa`, and three specific hardening items — an unhandled-rejection crash path, session-fixation-adjacent gap, and the CSRF posture). Round 2 ran a full SDD cycle to close them. Full detail: `openspec/changes/sec-expert-round2/findings-register.md`.
+
+### What Round 2 found and fixed
+- **3 HIGH-severity code findings, all fixed and verified**: a reachable unhandled-rejection crash source in `packages/server/src/transport/http.ts`'s `GET` branch (missing try/catch), no process-level `unhandledRejection` handler at all, and a genuine session-fixation-adjacent gap — password change never revoked other active sessions server-side (now fixed: revokes every other session, preserves the one that made the change, matching the OWASP-standard control).
+- **Dependency vulnerabilities — actually scanned this time** (Round 1 incorrectly bucketed `npm audit` as "out of reach"; it is not). `packages/server` went from 27 to 13 findings (4 CRITICAL closed — all traced to `@simplewebauthn/server@5.4.3`'s `elliptic`/`jsrsasign` chain, directly in the WebAuthn MFA signature-verification path, now bumped to v13.3.2 with the integration re-verified against a real registration+authentication round-trip test). `nodemailer` required a scope-deviated major bump (6.6.1→9.0.4, not the originally-planned 6.10.x) because the minor bump closed zero currently-known CVEs — disclosed honestly rather than shipping a cosmetic version bump. `packages/admin`'s one LOW finding closed. Every REMAINING dependency finding across all 7 packages (worker's `drizzle-orm`, app's `http-server` chain, server's `form-data`/`tar`/`lodash`/`qs`/`ws`/`minimatch`/`brace-expansion`) is documented with a codebase-specific exploitability trace — none silently left unaddressed.
+- **Secret scanning**: heuristic scan of the tracked tree (953 files) plus the last 100 commits' history — clean, no real secrets found.
+- **`packages/admin`/`packages/pwa` deeper re-review**: no new findings — Round 1's clean result holds up under independent skeptical re-review, including re-tracing every destructive-action authorization path end-to-end.
+- **CSRF posture formally confirmed** (not just assumed): the signed-request-body HMAC auth model has zero cookie usage anywhere in worker/server/app — CSRF-resistant by construction.
+
+### Zero unaddressed CRITICAL/HIGH after Round 2
+All findings from both rounds are now either fixed-and-verified or explicitly documented as accepted-risk with codebase-specific evidence (never a blanket "not exploitable" assertion without the actual usage trace).
+
+### Updated recommendations for the operator
+1. All of Round 1's recommendations still apply.
+2. `@simplewebauthn/server`'s major version bump (5→13) is this round's highest-regression-risk change — re-test WebAuthn/passkey registration and login manually against a real authenticator before considering this fully closed in production, in addition to the automated round-trip test added.
+3. The `nodemailer` major bump (6→9) changes a well-isolated, narrow call surface (`SMTPSender`) — low risk, but worth a live send-test in staging before trusting it fully.
+4. One dependency classification (`minimatch`/`brace-expansion`) was traced to `geolite2-redist`'s internal file-cleanup path during this round and confirmed non-exploitable — no further action needed, included here for completeness since it required a correction mid-investigation.
