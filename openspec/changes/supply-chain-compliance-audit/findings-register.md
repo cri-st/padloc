@@ -75,7 +75,7 @@ Lockfile discipline: every in-scope package plus root has a committed
 `package-lock.json` (`packages/{worker,server,admin,app,pwa,extension,core}/package-lock.json`,
 root `package-lock.json`) — confirmed present via directory listing.
 
-### S1. `app`/`pwa` SBOM generation blocked — `@types/trusted-types`/`dompurify` peer conflict — `OPEN — fix scheduled in Phase 2-5 of this change`
+### S1. `app`/`pwa` SBOM generation blocked — `@types/trusted-types`/`dompurify` peer conflict — `FIXED (commit d293f18f)`
 
 - **Evidence**: `cd packages/app && npm sbom --sbom-format cyclonedx` and the
   identical command in `packages/pwa` both exit 1:
@@ -88,9 +88,25 @@ root `package-lock.json`) — confirmed present via directory listing.
   silently exclude. `app`/`pwa` have real, complete license inventories
   (via `license-checker`, which tolerates the resolution conflict) but **no
   valid SBOM** until the dependency-tree conflict is resolved.
-- **Fix planned**: this change's Phase 4 pins `@types/trusted-types` to
-  `2.0.7` (devDependency) in `app`/`pwa` `package.json`, then re-runs `npm sbom`
-  to confirm exit 0.
+- **Fix**: Pinned `@types/trusted-types` to `2.0.7` (devDependency) in
+  `packages/app/package.json` and `packages/pwa/package.json` (both were
+  independently stale at `2.0.2`); regenerated both lockfiles'
+  `@types/trusted-types` entries to `2.0.7` (`npm install --package-lock-only`
+  fails outright on this repo's unpublished `@padloc/core`/`@padloc/locale`
+  local packages — patched the 4 lockfile locations per package directly
+  against the real npm registry's `2.0.7` resolved URL/integrity, confirmed
+  via an isolated `npm install --package-lock-only` run in a throwaway
+  directory).
+- **Verified**: `npm sbom --sbom-format cyclonedx` now exits 0 for both `app`
+  (240 components) and `pwa` (1058 components); `tsc --noEmit --skipLibCheck`
+  clean for both; the real `pwa` webpack build
+  (`lerna run build --scope @padloc/pwa`) compiles successfully; `DOMPurify.sanitize()`
+  smoke-tested in a real headless browser against the app's exact
+  `MARKDOWN_ALLOWED_TAGS`/`MARKDOWN_ALLOWED_ATTR` allowlist (`<script>` tags
+  stripped, `onerror`/`javascript:` URIs stripped, allowed tags/attrs
+  preserved) — confirmed `@types/trusted-types` ships zero runtime `.js`
+  files (type-only package), so the version pin cannot affect sanitizer
+  behavior at all.
 
 ### S2. One LGPL-3.0-or-later dependency — `worker`'s dev-only `wrangler`/`miniflare`/`sharp` chain — informational, no fix needed
 
@@ -132,7 +148,7 @@ this table per `supply-chain-compliance-baseline` Req. 3.
 - **Not fixed this change**: cosmetic/process discipline, no security or
   compliance blast radius; out of the 4 ADRs this change's Phase 2-5 covers.
 
-### S5. CI pins GitHub Actions by tag, not commit SHA — `OPEN — fix scheduled in Phase 2-5 of this change`
+### S5. CI pins GitHub Actions by tag, not commit SHA — `FIXED (commit bc2bcbf3)`
 
 - **Evidence**: `.github/workflows/docker-publish.yml:58,61,68,76,85` —
   `uses: actions/checkout@v4`, `docker/setup-buildx-action@v3`,
@@ -150,8 +166,19 @@ this table per `supply-chain-compliance-baseline` Req. 3.
   the pushed manifest. Disclosed as unconfirmed, not claimed either way. No
   ad-hoc `curl`/`wget` steps exist in `docker-publish.yml` itself, so no
   in-workflow checksum-verification gap beyond the action-pinning issue.
-- **Fix planned**: this change's Phase 5 resolves each action's release-tag
-  commit SHA and re-pins as `uses: owner/repo@<sha> # vX.Y.Z`.
+- **Fix**: `.github/workflows/docker-publish.yml`'s 5 `uses:` refs
+  (`actions/checkout@v4`, `docker/setup-buildx-action@v3`,
+  `docker/login-action@v3`, `docker/metadata-action@v5`,
+  `docker/build-push-action@v6`) re-pinned to the exact commit SHA each
+  major-version tag currently resolves to, tag preserved as a trailing
+  comment (e.g. `actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0`).
+- **Verified**: each SHA cross-checked two independent ways — `git ls-remote
+  --tags` against the real GitHub repo AND the unauthenticated GitHub REST
+  API (`/repos/<owner>/<repo>/git/refs/tags/<tag>`) — both agreed exactly for
+  all 5 actions, and all 5 are lightweight tags (`type: commit`, no
+  annotated-tag peeling ambiguity). Post-edit YAML re-parsed successfully
+  (Node `js-yaml`) confirming no syntax break to this repo's only CI
+  pipeline.
 
 ### S6. `nginx/Dockerfile` staleness and `apt-key`-based trust — `OUT OF SCOPE — legal/business judgment` (self-hosted-only)
 
@@ -206,7 +233,7 @@ review.
 Whether the raw IP is independently persisted anywhere outside this codebase
 (e.g. Cloudflare's own edge logs) is out of this review's reach.
 
-### C1. Attachment cascade-delete gap on account/org deletion — `OPEN — fix scheduled in Phase 2-5 of this change`
+### C1. Attachment cascade-delete gap on account/org deletion — `FIXED (commit 0854cd65)`
 
 - **Evidence**: `packages/core/src/server.ts:1289-1327` (`deleteAccount`) deletes
   the account's main `Vault` storage record (line 1315:
@@ -233,13 +260,21 @@ Whether the raw IP is independently persisted anywhere outside this codebase
   requirement in `supply-chain-compliance-baseline` covers data export.
 - **Maps to** `supply-chain-compliance-baseline` Req. "Attachment
   Cascade-Delete Completeness".
-- **Fix planned**: this change's Phase 2 adds
-  `attachmentStorage.deleteAll(account.mainVault.id)` to `deleteAccount()`
-  before the vault delete, and the equivalent per-vault call to `deleteOrg()`,
-  with no `try`/`catch` swallowing (errors propagate and abort deletion,
-  matching `deleteVault()`'s existing behavior).
+- **Fix**: `deleteAccount()` (`server.ts:1314-1315`) now calls
+  `attachmentStorage.deleteAll(account.mainVault.id)` before the main-vault
+  storage delete; `deleteOrg()` (`server.ts:1683-1686`) now loops
+  `org.vaults` calling `attachmentStorage.deleteAll(v.id)` before the
+  `Promise.all` vault delete — both mirror `deleteVault()`'s existing
+  pattern exactly, no `try`/`catch` swallowing.
+- **Verified**: new `packages/core/test/attachment-cascade-delete.spec.ts`
+  (real `Server`/`Controller`/`MemoryStorage`/`MemoryAttachmentStorage`, not
+  a reimplementation) proves `attachmentStorage.get()` throws `NOT_FOUND`
+  after `deleteAccount()` and after `deleteOrg()` (multi-vault) — 6/6
+  assertions pass. A negative-control run (temporarily reverting the two new
+  calls) reproduced 3/6 failures, confirming the test genuinely catches the
+  regression. `packages/server`'s pinned `tsc --noEmit --skipLibCheck` clean.
 
-### C2. Log retention — aspirational comment, never implemented (T26) — `OPEN — fix scheduled in Phase 2-5 of this change`
+### C2. Log retention — aspirational comment, never implemented (T26) — `FIXED (commit 27786b9c)`
 
 - **Evidence**: `packages/worker/src/storage/schema.ts:274-275`:
   ```
@@ -260,9 +295,19 @@ Whether the raw IP is independently persisted anywhere outside this codebase
   context, not as a formal legal determination).
 - **Maps to** `supply-chain-compliance-baseline` Req. "Log Retention
   Enforcement".
-- **Fix planned**: this change's Phase 3 adds a `scheduled(event, env, ctx)`
-  export to `packages/worker/src/index.ts`, a `LOG_RETENTION_DAYS` env var
-  (default 90), and a `[triggers]` cron block in `wrangler.toml`.
+- **Fix**: added `scheduled(event, env, ctx)` export to
+  `packages/worker/src/index.ts` (deletes `request_log`/`change_log` rows
+  older than `LOG_RETENTION_DAYS`, default 90, via the existing
+  `safeParsePositiveNumber` helper); added `LOG_RETENTION_DAYS?: string` to
+  `Env` (`env.ts`); added a daily `[triggers]` cron block
+  (`crons = ["0 3 * * *"]`) to `wrangler.toml`.
+- **Verified**: real local exercise via `wrangler dev --local --test-scheduled`
+  — seeded one 120-day-old row and one 1-day-old row into both `request_log`
+  and `change_log` via `wrangler d1 execute --local`, hit
+  `GET /__scheduled?cron=0+3+*+*+*`, confirmed the aged rows were deleted and
+  the fresh rows retained in both tables (`wrangler d1 execute` SELECT
+  cross-check), and confirmed `/healthcheck` still returns `200` afterward.
+  Full `npm run test:ci` (13 sub-suites) passes, exit 0, zero regressions.
 
 ### C3. Encryption posture for compliance purposes — confirmed, not re-derived
 
@@ -394,17 +439,17 @@ legal or business decision this review explicitly does not make.
 
 ---
 
-## Fix-Status Summary (for Phase 6 update)
+## Fix-Status Summary
 
-| Finding | Status now | Will become |
-|---|---|---|
-| C1 — Attachment cascade-delete | `OPEN — fix scheduled in Phase 2-5 of this change` | `FIXED (commit <sha>)` after Phase 2 |
-| C2 — Retention cron (T26) | `OPEN — fix scheduled in Phase 2-5 of this change` | `FIXED (commit <sha>)` after Phase 3 |
-| S1 — `app`/`pwa` SBOM blocker | `OPEN — fix scheduled in Phase 2-5 of this change` | `FIXED (commit <sha>)` after Phase 4 |
-| S5 — CI SHA-pinning | `OPEN — fix scheduled in Phase 2-5 of this change` | `FIXED (commit <sha>)` after Phase 5 |
-| L1 — AGPL/GPL-3.0 mismatch | `OUT OF SCOPE — legal/business judgment` | unchanged — never silently resolved |
-| L2 — `nginx/Dockerfile` modernization | `OUT OF SCOPE — legal/business judgment` | unchanged — documented recommendation only |
-| S2, S4, S7, S8, S9, C3, C4, C5, C6, C7 | `OPEN` (informational) | unchanged — no fix planned this change |
+| Finding | Status now |
+|---|---|
+| C1 — Attachment cascade-delete | `FIXED (commit 0854cd65)` |
+| C2 — Retention cron (T26) | `FIXED (commit 27786b9c)` |
+| S1 — `app`/`pwa` SBOM blocker | `FIXED (commit d293f18f)` |
+| S5 — CI SHA-pinning | `FIXED (commit bc2bcbf3)` |
+| L1 — AGPL/GPL-3.0 mismatch | `OUT OF SCOPE — legal/business judgment` — never silently resolved |
+| L2 — `nginx/Dockerfile` modernization | `OUT OF SCOPE — legal/business judgment` — documented recommendation only |
+| S2, S4, S7, S8, S9, C3, C4, C5, C6, C7 | `OPEN` (informational) — unchanged, no fix planned this change |
 
 ## Scope Disclosure
 
