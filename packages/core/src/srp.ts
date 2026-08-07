@@ -113,6 +113,54 @@ import { HashParams } from "./crypto";
 import { getCryptoProvider as getProvider } from "./platform";
 import { uuid } from "./util";
 
+// SECURITY (M2, deferred -- see openspec/changes/sec-expert/findings-register.md):
+// `Core.H()` hashes its BigInteger arguments by concatenating each one's
+// MINIMAL big-endian byte representation (`i2b` below trims to whole
+// bytes only, never pads to a fixed width). RFC 5054 SS2.5.4 requires
+// every number hashed as part of a longer input to be padded with
+// leading zeros to the byte-length of the group modulus N (its PAD()
+// function) before concatenation, specifically to make `H(a | b)`
+// unambiguous -- without fixed-width padding, two DIFFERENT (a, b) pairs
+// can concatenate to the SAME byte string whenever a value's top byte(s)
+// happen to be zero (a ~1/256 chance per boundary for each of A, B, u, k,
+// M1, M2). This SRP implementation follows the simpler srp.stanford.edu
+// SRP-6a design (see the file's top-level design-doc comment) rather than
+// RFC 5054 literally -- e.g. M1/M2 here are `H(A|B|K)`/`H(A|M1|K)`, not
+// RFC 5054's `H(H(N) xor H(g) | H(I) | s | A | B | K)` -- so this gap is
+// a self-consistency/canonicalization concern (client and server always
+// apply the SAME unpadded encoding, so a normal handshake still works
+// correctly today) rather than a currently-reachable forgery: unlike TLS-
+// SRP's PAD() requirement (multiple ciphersuites/implementations must
+// agree byte-for-byte), this codebase's client and server are the ONLY
+// two parties, always run the identical `i2b`/`H()` code, and `A`/`B` are
+// independently authenticated via the downstream `M1`/`M2` checks the
+// caller already performs.
+//
+// NOT fixed in this round: a correct fix requires PADDING EACH ARGUMENT
+// TO ITS OWN CANONICAL WIDTH, not a single blanket change to `i2b` --
+// `A`/`B`/`v`/`g` need padding to N's byte-length (which itself varies
+// with the configured `SRPGroupLength`: 384/512/768/1024 bytes), while
+// `K`/`M1` (hash-derived values fed back into further `H()` calls) need
+// padding to the DIGEST's byte-length (20 or 32 bytes) instead --
+// `i2b`/`H()` are generic and used uniformly across every call site in
+// `Core`, so getting this wrong for even one argument silently changes
+// what every client and server byte-for-byte computes for `u`/`k`/`M1`/
+// `M2`/`K`. Because this repo has no version negotiation for the SRP
+// wire format and clients (PWA/extension/electron/cordova) cache their
+// bundle aggressively (see e.g. the padloc-pwa-theme-color-and-sw-cache-
+// staleness gotcha), a byte-for-byte mismatch between an old cached
+// client and a freshly deployed server would fail EVERY login/signup
+// simultaneously and irrecoverably until every client re-fetches, with
+// no rollback short of reverting the deploy. Given the current gap is
+// not independently exploitable (see above) and a rushed per-argument
+// padding change to the single most security-critical file in this repo
+// carries that outsized, hard-to-roll-back blast radius, this is
+// deferred rather than rushed. A correct fix should (a) pad each
+// argument to its own canonical width as described above, (b) be
+// verified with a byte-level test vector shared between an old and new
+// implementation, and (c) ship behind a protocol-version bump so old
+// cached clients fail closed with a clear "please refresh" error instead
+// of a silently-broken handshake.
 async function digest(hash: "SHA-1" | "SHA-256" = "SHA-256", ...input: Uint8Array[]): Promise<Uint8Array> {
     return getProvider().hash(concatBytes(input), new HashParams({ algorithm: hash }));
 }
