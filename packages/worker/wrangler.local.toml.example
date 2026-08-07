@@ -14,6 +14,9 @@ main = "src/index.ts"
 compatibility_date = "2025-04-01"
 account_id = "<your-cloudflare-account-id>"
 
+[triggers]
+crons = ["0 3 * * *"]
+
 [alias]
 "@padloc/locale/src/translate" = "./node_modules/@padloc/locale/src/translate.ts"
 "@padloc/core/src" = "./node_modules/@padloc/core/src"
