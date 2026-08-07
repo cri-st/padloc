@@ -6,6 +6,11 @@ compatibility_date = "2025-04-01"
 # Real (non-local) deploy environments live in wrangler.local.toml, which is
 # git-ignored -- see wrangler.local.toml.example for the template.
 
+# Log retention cron -- prunes `request_log`/`change_log` rows older than
+# `LOG_RETENTION_DAYS` (default 90, see src/env.ts). Runs daily at 03:00 UTC.
+[triggers]
+crons = ["0 3 * * *"]
+
 [alias]
 "@padloc/locale/src/translate" = "./node_modules/@padloc/locale/src/translate.ts"
 "@padloc/core/src" = "./node_modules/@padloc/core/src"

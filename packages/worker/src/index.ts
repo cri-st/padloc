@@ -348,6 +348,42 @@ export default {
             }
         });
     },
+
+    /**
+     * Log retention cron -- prunes `request_log`/`change_log` rows older
+     * than `LOG_RETENTION_DAYS` (default 90). See `storage/schema.ts`'s
+     * "T26" comment and `supply-chain-compliance-audit` findings-register.md
+     * C2. Registered via `wrangler.toml`'s `[triggers]` block.
+     */
+    async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+        initializeHqInstrumentationFromEnv(env, ctx);
+
+        if (!env.DB) {
+            captureHqException(new Error("scheduled(): DB binding missing, log retention skipped"), {
+                "padloc.error.code": "log_retention_db_binding_missing",
+            });
+            return;
+        }
+
+        const retentionDays = safeParsePositiveNumber(env.LOG_RETENTION_DAYS, 90);
+        const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+
+        await withHqSpan(
+            "padloc.worker.scheduled.log_retention",
+            { attributes: { "padloc.log_retention.days": retentionDays, "padloc.log_retention.cutoff": cutoff } },
+            async () => {
+                try {
+                    await env.DB!.batch([
+                        env.DB!.prepare("DELETE FROM request_log WHERE timestamp < ?").bind(cutoff),
+                        env.DB!.prepare("DELETE FROM change_log WHERE timestamp < ?").bind(cutoff),
+                    ]);
+                } catch (error) {
+                    captureHqException(error, { "padloc.error.code": "log_retention_delete_failed" });
+                    throw error;
+                }
+            }
+        );
+    },
 };
 
 function requestAttributes(request: Request): Record<string, unknown> {

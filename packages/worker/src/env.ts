@@ -19,6 +19,7 @@ export interface Env {
     SIGNUP_ALLOW_DOMAINS?: string;
     SIGNUP_ALLOWED_DOMAINS?: string;
     RATE_LIMIT_MAX_REQUESTS?: string;
+    LOG_RETENTION_DAYS?: string;
     RATE_LIMIT_WINDOW_MS?: string;
     HQ_SENTRY_DSN?: string;
     HQ_OTLP_ENDPOINT?: string;
