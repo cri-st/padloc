@@ -491,6 +491,85 @@ async function runTests(): Promise<TestResult[]> {
         }
     });
 
+    // ── Test 5d: Password change invalidates pending (not-yet-completed) SRP
+    // handshakes started with the OLD password ──
+    // Regression coverage for server.ts's updateAuth(): auth.srpSessions holds
+    // in-flight handshakes initialized against the verifier active at
+    // startCreateSession time. Without clearing them on a verifier change,
+    // someone who already started a handshake with a compromised old password
+    // could still complete it for up to srpSessions' 1h expiry window, even
+    // after the account owner "secured their account" by changing the
+    // password.
+    await test("Password change invalidates a pending SRP handshake started with the old password", async () => {
+        const email = `pw-change-srp-${await uuid()}@test.padloc.app`;
+        const oldPassword = "OldPassword123!";
+        const newPassword = "NewPassword456!";
+
+        const { client: ownerClient } = await createAccountAndLogin(email, oldPassword);
+
+        // Attacker (or a stale legitimate client) starts -- but does not
+        // complete -- a handshake using the OLD password, exactly like
+        // login()'s first half.
+        const attackerClient = await createClient();
+        const startRes = await attackerClient.startCreateSession(new StartCreateSessionParams({ email }));
+
+        const oldAuth = new Auth(email);
+        oldAuth.keyParams = startRes.keyParams;
+        const oldAuthKey = await oldAuth.getAuthKey(oldPassword);
+        const attackerSrp = new SRPClient();
+        await attackerSrp.initialize(oldAuthKey);
+        await attackerSrp.setB(startRes.B!);
+
+        // Legitimate owner changes the password via their already-completed session.
+        const newAuth = new Auth(email);
+        newAuth.keyParams.iterations = PBKDF2_ITER_MIN;
+        const newAuthKey = await newAuth.getAuthKey(newPassword);
+        const newSrp = new SRPClient();
+        await newSrp.initialize(newAuthKey);
+        newAuth.verifier = newSrp.v!;
+
+        await ownerClient.updateAuth(
+            new UpdateAuthParams({
+                verifier: newAuth.verifier,
+                keyParams: newAuth.keyParams,
+            })
+        );
+
+        // The pending handshake -- still holding a valid proof of the OLD
+        // password -- must now be rejected; auth.srpSessions was cleared.
+        let pendingHandshakeRejected = false;
+        let lastError: unknown;
+        try {
+            await attackerClient.completeCreateSession(
+                new CompleteCreateSessionParams({
+                    accountId: startRes.accountId,
+                    srpId: startRes.srpId,
+                    A: attackerSrp.A!,
+                    M: attackerSrp.M1!,
+                })
+            );
+        } catch (err: unknown) {
+            lastError = err;
+            if (err instanceof Err && err.code === ErrorCode.INVALID_SESSION) {
+                pendingHandshakeRejected = true;
+            }
+        }
+        if (!pendingHandshakeRejected) {
+            throw new Error(
+                `Pending SRP handshake with the OLD password was not invalidated by the password change. Error: ${
+                    lastError instanceof Err ? lastError.code : String(lastError)
+                }`
+            );
+        }
+
+        // Sanity: the NEW password still works for a fresh login.
+        const { client: freshClient } = await login(email, newPassword);
+        const account = await freshClient.getAccount();
+        if (account.email !== email) {
+            throw new Error("Login with the new password failed after the password change");
+        }
+    });
+
     // ── TOTP MFA Tests ──
 
     // ── Test 6: TOTP registration happy path ──

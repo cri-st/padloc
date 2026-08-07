@@ -659,6 +659,19 @@ export class Controller extends API {
             const otherSessions = auth.sessions.filter((s) => s.id !== session.id);
             await Promise.all(otherSessions.map((s) => this.storage.delete(Object.assign(new Session(), s))));
             auth.sessions = auth.sessions.filter((s) => s.id === session.id);
+
+            // SECURITY: pending (not-yet-completed) SRP handshakes in
+            // auth.srpSessions were initialized against the OLD verifier
+            // (see startCreateSession/startAuthRequest's `srp.initialize(auth.verifier!)`)
+            // and normally survive up to 1 hour (see the expiry sweep below).
+            // Without clearing them here, someone who already started a
+            // handshake using the old (possibly compromised) password could
+            // still complete authentication with it for up to that full
+            // window after the legitimate owner "secured their account" by
+            // changing the password -- the same residual-access problem the
+            // session revocation above closes, just for in-flight handshakes
+            // instead of already-completed sessions.
+            auth.srpSessions = [];
         }
 
         if (keyParams) {
