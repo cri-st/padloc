@@ -145,7 +145,12 @@ export class Session extends Serializable implements Storable {
      */
     async authenticate(r: Request | Response): Promise<void> {
         const data = (<Request>r).params || (<Response>r).result;
-        r.auth = await this._sign(data);
+        // SECURITY: `method` is bound into the signed message (see `_sign`/`_verify`)
+        // so a captured signed envelope for one RPC method cannot be replayed as a
+        // different method within the request-age window. `Response` has no `method`
+        // field, so it consistently signs/verifies as "" on that path.
+        const method = (<Request>r).method || "";
+        r.auth = await this._sign(method, data);
     }
 
     /**
@@ -158,14 +163,15 @@ export class Session extends Serializable implements Storable {
         }
 
         const data = (<Request>r).params || (<Response>r).result;
+        const method = (<Request>r).method || "";
 
-        return this._verify(r.auth, data);
+        return this._verify(r.auth, method, data);
     }
 
-    private async _sign(data: any): Promise<RequestAuthentication> {
+    private async _sign(method: string, data: any): Promise<RequestAuthentication> {
         const time = new Date();
         const session = this.id;
-        const message = `${session}_${time.toISOString()}_${marshal(data)}`;
+        const message = `${session}_${method}_${time.toISOString()}_${marshal(data)}`;
         const signature = await getProvider().sign(this.key!, stringToBytes(message), new HMACParams());
         return new RequestAuthentication({
             session,
@@ -174,9 +180,9 @@ export class Session extends Serializable implements Storable {
         });
     }
 
-    private async _verify(auth: RequestAuthentication, data: any): Promise<boolean> {
+    private async _verify(auth: RequestAuthentication, method: string, data: any): Promise<boolean> {
         const { signature, time } = auth;
-        const message = `${this.id}_${time.toISOString()}_${marshal(data)}`;
+        const message = `${this.id}_${method}_${time.toISOString()}_${marshal(data)}`;
         return await getProvider().verify(this.key!, signature, stringToBytes(message), new HMACParams());
     }
 }
