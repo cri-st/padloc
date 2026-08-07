@@ -930,6 +930,13 @@ export class StripeProvisioner extends BasicProvisioner {
             httpRes.writeHead(401);
             httpRes.write("Invalid or expired url!");
             httpRes.end();
+            // SECURITY: without this return, execution fell through to the
+            // rest of the handler on an already-ended response, eventually
+            // hitting `httpRes.writeHead(302, ...)` below -> throws
+            // ERR_HTTP_HEADERS_SENT as an unhandled rejection (no .catch,
+            // no process-level handler) -> crashes the whole backend
+            // process from a single unauthenticated request.
+            return;
         }
 
         const email = params.get("email");
