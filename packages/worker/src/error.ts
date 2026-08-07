@@ -106,18 +106,3 @@ function isRateLimitError(unknown: unknown): boolean {
     return false;
 }
 
-/**
- * Build an HTTP response from an `Err` using a consistent JSON shape.
- * Internal details (stack, originalError) are never exposed.
- */
-export function errorResponse(error: Err, allowOrigin: string): Response {
-    return new Response(JSON.stringify({ error: error.toResponse() }), {
-        status: error.status,
-        headers: {
-            "Content-Type": "application/json; charset=utf-8",
-            "Access-Control-Allow-Origin": allowOrigin || "*",
-            "Access-Control-Allow-Methods": "OPTIONS, POST",
-            "Access-Control-Allow-Headers": "Content-Type",
-        },
-    });
-}

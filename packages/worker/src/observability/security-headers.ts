@@ -28,11 +28,16 @@ export interface SecurityHeadersConfig {
 }
 
 /**
- * Default CORS configuration.
- * In production, ALLOW_ORIGIN should be set to a specific domain.
+ * Default CORS configuration. Deliberately typed WITHOUT `allowOrigin`
+ * (unlike `CorsConfig`, where it's required) -- `corsHeaders()` below
+ * never falls back to a default origin (`config.allowOrigin` is always
+ * required at every call site), so a wildcard `allowOrigin: "*"` sitting
+ * unused in this object was an attractive nuisance: a future refactor
+ * adding `config.allowOrigin ?? DEFAULT_CORS.allowOrigin` would silently
+ * reintroduce wildcard CORS. Only the fields this module actually reads
+ * as fallbacks (`allowMethods`/`allowHeaders`) are defined.
  */
-export const DEFAULT_CORS: CorsConfig = {
-    allowOrigin: "*",
+export const DEFAULT_CORS: Omit<CorsConfig, "allowOrigin"> = {
     allowMethods: ["OPTIONS", "POST"],
     allowHeaders: ["Content-Type"],
     maxAge: 86400, // 24 hours

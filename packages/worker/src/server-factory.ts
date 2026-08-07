@@ -137,6 +137,21 @@ function createMessenger(env: Env): Messenger {
         hasEmailFromAddress: !!env.EMAIL_FROM_ADDRESS,
     });
     if (env.EMAIL_BACKEND === "mock") {
+        // SECURITY: unlike other optional-binding fallbacks in this file,
+        // this one is invisible to the OPERATOR too, not just silent to
+        // the caller -- every verification/password-reset/invite email
+        // simply vanishes with no error surfaced anywhere in the request
+        // path (MockMessenger just records sends in memory for tests).
+        // Alerted the same way as the `ACCOUNT_LOCK`/rate-limit DO
+        // binding checks so a `EMAIL_BACKEND=mock` value that lands in
+        // production/staging (e.g. a copy-pasted dev env var) is caught
+        // instead of silently breaking email delivery for every user.
+        if (env.HQ_ENVIRONMENT === "production" || env.HQ_ENVIRONMENT === "staging") {
+            captureHqException(
+                new Error(`EMAIL_BACKEND=mock in ${env.HQ_ENVIRONMENT} -- no real email will ever be sent`),
+                { "padloc.error.code": "mock_email_backend_in_production" }
+            );
+        }
         return sharedMockMessenger;
     }
     if (env.RESEND_API_KEY && env.EMAIL_FROM_ADDRESS) {
