@@ -5,15 +5,13 @@ import {
     generateAuthenticationOptions,
     verifyAuthenticationResponse,
     MetadataService,
-} from "@simplewebauthn/server";
-import {
     PublicKeyCredentialCreationOptionsJSON,
-    RegistrationCredentialJSON,
+    RegistrationResponseJSON,
     PublicKeyCredentialRequestOptionsJSON,
-    AuthenticationCredentialJSON,
-} from "@simplewebauthn/typescript-types";
+    AuthenticationResponseJSON,
+} from "@simplewebauthn/server";
 import { Err, ErrorCode } from "@padloc/core/src/error";
-import { base64ToBytes, bytesToBase64 } from "@padloc/core/src/encoding";
+import { base64ToBytes, bytesToBase64, stringToBytes } from "@padloc/core/src/encoding";
 import { Auth } from "@padloc/core/src/auth";
 import { Config, ConfigParam } from "@padloc/core/src/config";
 
@@ -76,12 +74,20 @@ export class WebAuthnServer implements AuthServer {
                   }
                 : { authenticatorAttachment: "cross-platform" };
 
-        const registrationOptions = generateRegistrationOptions({
+        // SECURITY/COMPAT: @simplewebauthn/server v13's `userID` is now typed as raw bytes
+        // (`Uint8Array_`), not a string like older versions accepted -- encode the account id
+        // explicitly rather than passing it through unconverted.
+        const registrationOptions = await generateRegistrationOptions({
             ...this.config,
-            userID: auth.account,
+            userID: stringToBytes(auth.account),
             userName: auth.email,
             // userDisplayName: account.name,
-            attestationType: "indirect",
+            // COMPAT: WebAuthn Level 3 (and @simplewebauthn/server v13) dropped "indirect" from
+            // AttestationConveyancePreference. "none" matches packages/worker/src/auth/webauthn.ts's
+            // already-migrated v13 implementation (this file's server-side counterpart) -- browsers
+            // largely ignore the requested conveyance anyway, so this is a naming/consistency choice,
+            // not a behavior change.
+            attestationType: "none",
             authenticatorSelection,
             // excludeCredentials: auth.authenticators
             //     .filter(
@@ -91,7 +97,7 @@ export class WebAuthnServer implements AuthServer {
             //             auth.state.registrationInfo
             //     )
             //     .map((a: Authenticator<WebAuthnAuthenticatorData>) => ({
-            //         id: base64ToBytes(a.state!.registrationInfo!.credentialID),
+            //         id: a.state!.registrationInfo!.credentialID,
             //         type: "public-key",
             //     })),
         });
@@ -105,7 +111,7 @@ export class WebAuthnServer implements AuthServer {
 
     async activateAuthenticator(
         authenticator: Authenticator<WebAuthnAuthenticatorData>,
-        credential: RegistrationCredentialJSON
+        credential: RegistrationResponseJSON
     ) {
         if (!authenticator.state?.registrationOptions) {
             throw new Err(
@@ -113,11 +119,14 @@ export class WebAuthnServer implements AuthServer {
                 "Failed to activate authenticator. No registration options provided."
             );
         }
+        // COMPAT: v13 renamed this options field `credential` -> `response` (the browser's
+        // registration response); see verifyAuthenticationResponse below for the corresponding
+        // `credential` rename on the OTHER side (stored credential record).
         const { verified, registrationInfo } = await verifyRegistrationResponse({
+            response: credential,
             expectedChallenge: authenticator.state.registrationOptions.challenge,
             expectedOrigin: this.config.origin,
             expectedRPID: this.config.rpID,
-            credential,
         });
         if (!verified) {
             throw new Err(
@@ -126,11 +135,17 @@ export class WebAuthnServer implements AuthServer {
             );
         }
 
-        const { credentialID, credentialPublicKey, counter, aaguid } = registrationInfo!;
+        // COMPAT: v13 nests the verified credential under `registrationInfo.credential` (an
+        // `{ id, publicKey, counter }` object) instead of flat `credentialID`/`credentialPublicKey`
+        // fields. `credential.id` is already a base64url string (not raw bytes), unlike the old
+        // `credentialID` Buffer -- Padloc's own persisted `WebAuthnRegistrationInfo` shape (below)
+        // is unchanged and independent of the library's internal field names, so no data migration
+        // is needed for already-enrolled credentials.
+        const { aaguid, credential: verifiedCredential } = registrationInfo!;
         authenticator.state.registrationInfo = {
-            credentialID: bytesToBase64(credentialID),
-            credentialPublicKey: bytesToBase64(credentialPublicKey),
-            counter,
+            credentialID: verifiedCredential.id,
+            credentialPublicKey: bytesToBase64(verifiedCredential.publicKey),
+            counter: verifiedCredential.counter,
             aaguid,
         };
 
@@ -145,10 +160,11 @@ export class WebAuthnServer implements AuthServer {
             throw new Err(ErrorCode.AUTHENTICATION_FAILED, "Authenticator not fully registered.");
         }
 
-        const options = generateAuthenticationOptions({
-            allowCredentials: [
-                { type: "public-key", id: base64ToBytes(authenticator.state.registrationInfo.credentialID) },
-            ],
+        // COMPAT: v13's `allowCredentials[].id` is a base64url string (no `type` field anymore),
+        // so the stored `credentialID` is passed through directly instead of decoding to bytes.
+        const options = await generateAuthenticationOptions({
+            rpID: this.config.rpID,
+            allowCredentials: [{ id: authenticator.state.registrationInfo.credentialID }],
             userVerification: "preferred",
         });
 
@@ -162,22 +178,26 @@ export class WebAuthnServer implements AuthServer {
     async verifyAuthRequest(
         authenticator: Authenticator<WebAuthnAuthenticatorData>,
         request: AuthRequest<WebAuthnRequestData>,
-        credential: AuthenticationCredentialJSON
+        credential: AuthenticationResponseJSON
     ) {
         if (!authenticator.state?.registrationInfo || !request.state?.authenticationOptions) {
             throw new Err(ErrorCode.AUTHENTICATION_FAILED, "Failed to complete authentication request.");
         }
 
-        const { credentialPublicKey, credentialID, ...rest } = authenticator.state.registrationInfo;
-        const { verified, authenticationInfo } = verifyAuthenticationResponse({
+        const { credentialPublicKey, credentialID, counter } = authenticator.state.registrationInfo;
+        // COMPAT: v13 renamed the options fields `credential` -> `response` (the browser's
+        // authentication response) and `authenticator` -> `credential` (the stored credential
+        // record, now shaped as `{ id, publicKey, counter }` instead of
+        // `{ credentialID, credentialPublicKey, counter }`).
+        const { verified, authenticationInfo } = await verifyAuthenticationResponse({
+            response: credential,
             expectedChallenge: request.state.authenticationOptions.challenge,
             expectedOrigin: this.config.origin,
             expectedRPID: this.config.rpID,
-            credential,
-            authenticator: {
-                credentialID: Buffer.from(base64ToBytes(credentialID)),
-                credentialPublicKey: Buffer.from(base64ToBytes(credentialPublicKey)),
-                ...rest,
+            credential: {
+                id: credentialID,
+                publicKey: base64ToBytes(credentialPublicKey),
+                counter,
             },
         });
 
