@@ -508,7 +508,18 @@ export class Controller extends API {
         // password (SRP) and every MFA/auth-token verification path, so it
         // must be protected by the same lock to avoid the identical
         // concurrent-guess race.
-        return this.accountLock.withLock([(email || "").trim().toLocaleLowerCase()], async () => {
+        // SECURITY: `.toLowerCase()`, not `.toLocaleLowerCase()` -- must
+        // match the normalization every `AccountLockProvider`
+        // implementation uses for the SAME identity (worker DO-backed
+        // `withAccountLocks` and the in-process fallback both use
+        // `.toLowerCase()`, see account-lock.ts in each package).
+        // `toLocaleLowerCase()` can diverge from `toLowerCase()` for
+        // specific Unicode inputs depending on the runtime's configured
+        // locale (e.g. Turkish dotless-i case folding) -- a mismatch here
+        // would let two differently-folded spellings of the SAME logical
+        // email map to different lock keys, defeating the mutual
+        // exclusion this lock exists to provide.
+        return this.accountLock.withLock([(email || "").trim().toLowerCase()], async () => {
             const auth = (this.context.auth = await this._getAuth(email));
 
             // Persistent per-account lockout (see completeCreateSession).
@@ -771,7 +782,9 @@ export class Controller extends API {
         // only the last write landed and the counter only ever advanced
         // by 1 per burst regardless of how many guesses actually
         // happened, completely defeating the 10-attempt lockout.
-        return this.accountLock.withLock([(acc.email || "").trim().toLocaleLowerCase()], async () => {
+        // SECURITY: `.toLowerCase()`, not `.toLocaleLowerCase()` -- see
+        // the matching comment on `completeAuthRequest`'s lock above.
+        return this.accountLock.withLock([(acc.email || "").trim().toLowerCase()], async () => {
             this.context.account = acc;
             const auth = (this.context.auth = await this._getAuth(acc.email));
             this.context.provisioning = await this.provisioner.getProvisioning(auth);
@@ -2264,6 +2277,20 @@ export class Controller extends API {
     async getKeyStoreEntry({ id, authToken }: GetKeyStoreEntryParams) {
         const { account } = this._requireAuth();
         const entry = await this.storage.get(KeyStoreEntry, id);
+
+        // SECURITY: explicit ownership check, mirroring
+        // `deleteKeyStoreEntry`'s identical guard below -- previously
+        // relied only on `_useAuthToken`'s implicit `authenticatorId`
+        // match to keep this scoped to the caller's own entries. Adding
+        // the same explicit check here removes any dependency on
+        // `_useAuthToken`'s internals continuing to enforce that
+        // invariant and matches the sibling method's pattern exactly.
+        if (entry.accountId !== account.id) {
+            throw new Err(
+                ErrorCode.INSUFFICIENT_PERMISSIONS,
+                "You don't have the necessary permissions to perform this action!"
+            );
+        }
 
         await this._useAuthToken({
             email: account.email,
