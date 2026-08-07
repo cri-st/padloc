@@ -1311,6 +1311,9 @@ export class Controller extends API {
 
         await this.provisioner.accountDeleted(auth);
 
+        // Delete all attachments associated with this account's main vault
+        await this.attachmentStorage.deleteAll(account.mainVault.id);
+
         // Delete main vault
         await this.storage.delete(Object.assign(new Vault(), { id: account.mainVault.id }));
 
@@ -1675,6 +1678,11 @@ export class Controller extends API {
 
         if (!org.isOwner(account)) {
             this._requireAuth(true);
+        }
+
+        // Delete all attachments associated with each org vault
+        for (const v of org.vaults) {
+            await this.attachmentStorage.deleteAll(v.id);
         }
 
         // Delete all associated vaults
