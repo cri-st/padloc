@@ -40,6 +40,22 @@ export class MongoDBStorageConfig extends Config {
 // allowlist before it is ever used to build a `$`-prefixed key.
 const ALLOWED_OPERATORS = new Set(["eq", "ne", "gt", "lt", "gte", "lte"]);
 
+// SECURITY: `query.path` is used as a MongoDB filter *key* (object property
+// name) in every leaf branch below. Mongo treats a `$`-prefixed top-level key
+// as an operator (`$where` -> arbitrary server-side JS execution, `$expr`,
+// cross-tenant filter-scope bypass via a crafted nested-operator key, etc.),
+// and dotted segments are walked as a real nested-field path -- so each
+// dot-separated segment must independently be restricted to a safe
+// identifier shape before it is ever used as an object key, mirroring
+// `storage/postgres.ts`'s `assertSafeKey`.
+const SAFE_KEY_SEGMENT = /^[a-zA-Z0-9_]+$/;
+
+function assertSafePath(path: unknown): asserts path is string {
+    if (typeof path !== "string" || !path.length || !path.split(".").every((segment) => SAFE_KEY_SEGMENT.test(segment))) {
+        throw new Err(ErrorCode.BAD_REQUEST, `Invalid query field: ${JSON.stringify(path)}`);
+    }
+}
+
 // SECURITY: same class of issue as packages/core/src/storage.ts's
 // filterByQuery -- `query.value` here becomes a MongoDB `$regex`, and
 // while MongoDB's own regex engine has some internal safeguards, an
@@ -67,6 +83,7 @@ function queryToMongoFilter(query: StorageQuery): Filter<any> {
         case "not":
             return { $nor: [queryToMongoFilter(query.query)] };
         case "regex":
+            assertSafePath(query.path);
             assertSafeRegexPattern(query.value);
             return {
                 [query.path]: {
@@ -75,6 +92,7 @@ function queryToMongoFilter(query: StorageQuery): Filter<any> {
                 },
             };
         case "negex":
+            assertSafePath(query.path);
             assertSafeRegexPattern(query.value);
             return {
                 [query.path]: {
@@ -86,6 +104,7 @@ function queryToMongoFilter(query: StorageQuery): Filter<any> {
             };
         case "eq":
         case undefined:
+            assertSafePath(query.path);
             return {
                 [query.path]: query.value,
             };
@@ -93,6 +112,7 @@ function queryToMongoFilter(query: StorageQuery): Filter<any> {
             if (!ALLOWED_OPERATORS.has(query.op)) {
                 throw new Err(ErrorCode.BAD_REQUEST, `Unsupported query operator: ${JSON.stringify(query.op)}`);
             }
+            assertSafePath(query.path);
             return {
                 [query.path]: {
                     [`$${query.op}`]: query.value,
