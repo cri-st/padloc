@@ -342,7 +342,7 @@ Whether the raw IP is independently persisted anywhere outside this codebase
   `GET /__scheduled?cron=0+3+*+*+*`, confirmed the aged rows were deleted and
   the fresh rows retained in both tables (`wrangler d1 execute` SELECT
   cross-check), and confirmed `/healthcheck` still returns `200` afterward.
-  Full `npm run test:ci` (13 sub-suites) passes, exit 0, zero regressions.
+  Full `npm run test:ci` (14 sub-suites) passes, exit 0, zero regressions.
 
 ### C3. Encryption posture for compliance purposes — confirmed, not re-derived
 
@@ -497,8 +497,8 @@ legal or business decision this review explicitly does not make.
   ```
   (confirmed by reading the file header directly). But **every single
   `package.json`** — root and all 7 in-scope packages — declares
-  `"license": "GPL-3.0"` (`server`, `core`, `app`, `pwa`, `admin`, root) or
-  `"license": "GPLv3"` (`worker`, `extension`), confirmed via a direct grep of
+  `"license": "GPL-3.0"` (`extension`, `core`, `app`, `pwa`, `admin`, root) or
+  `"license": "GPLv3"` (`worker`, `server`), confirmed via a direct grep of
   each `package.json`'s `license` field. Neither declared value is AGPL, and
   `"GPLv3"` is not even a valid SPDX identifier.
 - **Why this is a legal call, not a code fix**: this mismatch is upstream
