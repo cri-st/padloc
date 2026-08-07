@@ -20,6 +20,41 @@ same SDD change will fix later in this branch; `OUT OF SCOPE — legal/business
 judgment` = intentionally not resolved by code, per
 `supply-chain-compliance-baseline` Req. 3.
 
+## Executive Summary (Phase 6)
+
+19 findings total across three categories: 9 supply-chain (`S1`-`S9`), 8
+compliance (`C1`-`C8`), 2 legal/business judgment calls (`L1`-`L2`).
+
+- **4 code fixes applied, tested, and verified** (not "should work" — see
+  each finding's own `tsc`/test/live-exercise evidence): `C1` Attachment
+  cascade-delete (`0854cd65`), `C2` Retention cron/T26 (`27786b9c`), `S1`
+  `app`/`pwa` SBOM blocker (`d293f18f`), `S5` CI SHA-pinning (`bc2bcbf3`).
+- **1 new finding disclosed mid-remediation, deliberately not fixed**: `C8`
+  — `D1Storage.save()`'s generic fallback never populates the `NOT
+  NULL`-constrained columns `change_log`/`request_log` declare, found while
+  live-verifying `C2`'s retention cron. Genuinely outside this change's 4
+  planned ADRs; disclosed per `supply-chain-compliance-baseline` Req. 3
+  (Scope Disclosure Honesty) rather than silently left out or folded in
+  unreviewed. See `C8` for full evidence and impact on `C2`/`C4`.
+- **2 legal/business judgment calls surfaced, never silently resolved**:
+  `L1` AGPL-vs-`GPL-3.0` license-declaration mismatch, `L2`
+  `nginx/Dockerfile` staleness — both documented as recommendations, not
+  code-fixed, per `proposal.md`'s explicit Out of Scope list.
+- **10 findings remain `OPEN`/informational by design**: `S2`, `S4`, `S7`,
+  `S8`, `S9`, `C3`, `C4`, `C5`, `C6`, `C7` — each evidence-backed, none
+  planned for a code fix in this change (see each finding's own "Not fixed
+  this change" rationale).
+- **`supply-chain-compliance-baseline` spec compliance**: all 7 requirements'
+  Given/When/Then scenarios are satisfied by this register's content — see
+  requirement-by-requirement verification in the archived `tasks.md` Phase 6
+  record and this file's structure (every finding cites file:line or
+  reproducible command output; blocked packages reported, not excluded;
+  legal calls labeled, not resolved; the 2 destructive fixes have real
+  test/live-exercise evidence, not inspection-only).
+- **Not a compliance certification**: see **Scope Disclosure** at the bottom
+  of this file — this register is code-verified evidence for a real
+  compliance/legal review, not a substitute for one.
+
 ## Tool Re-Run Confirmation
 
 Re-ran with `PATH=/usr/local/bin:$PATH` (Node v24.13.0, npm 11.6.2 — the
@@ -372,6 +407,78 @@ Whether the raw IP is independently persisted anywhere outside this codebase
   cookie/consent concern in the ePrivacy sense. No other tracking/analytics
   beacon was found in `packages/app`/`packages/pwa`.
 
+### C8. `D1Storage.save()` generic fallback never populates `change_log`/`request_log` NOT NULL columns — audit/request logging likely broken in production — `DISCLOSED — OUT OF SCOPE for this change (found during Phase 3 verification, not one of the 4 planned ADRs; recommend a dedicated fix in a future change)`
+
+- **Discovered**: mid-Phase-3, while verifying the C2 retention-cron fix
+  against real seeded `request_log`/`change_log` rows via
+  `wrangler d1 execute --local`. Disclosed here per the same honesty
+  standard `sec-expert` used for findings discovered mid-remediation — not
+  fixed, since it falls outside this change's 4 planned ADRs (Phase 2-5),
+  but too real and too load-bearing on **C4 (Audit Logging)** and **C2 (Log
+  Retention)** above to leave unrecorded.
+- **Evidence — the fallback branch**: `packages/worker/src/storage/d1.ts:291-295`.
+  `D1Storage.save()` special-cases `accounts`/`auth`/`sessions`/`vaults`/`orgs`/`key_store_entries`
+  (lines 199-290, each populating its indexed/`NOT NULL` columns explicitly —
+  see the `key_store_entries` comment at lines 285-287 documenting this exact
+  failure mode for that table's own history). `change_log`/`request_log`
+  (`tableFor()`'s `changelog`/`requestlog` kinds, `d1.ts:53-54`) hit neither
+  special case, falling to the generic `else` at line 291:
+  ```
+  // Generic fallback: just id and data
+  stmt = `INSERT INTO ${tableName} (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = ?`;
+  bindings = [obj.id, JSON.stringify(raw), JSON.stringify(raw)];
+  ```
+- **Evidence — the constraint it violates**: `packages/worker/migrations/0000_init.sql:151-158`
+  declares `change_log` with `action TEXT NOT NULL`, `object_type TEXT NOT NULL`,
+  `object_id TEXT NOT NULL`, `timestamp TEXT NOT NULL` (only `data` is
+  nullable); `0000_init.sql:163-171` declares `request_log` with
+  `method TEXT NOT NULL`, `path TEXT NOT NULL`, `status INTEGER NOT NULL`,
+  `timestamp TEXT NOT NULL` (only `duration_ms`/`ip` nullable). The Drizzle
+  schema mirrors the same constraints at `packages/worker/src/storage/schema.ts:252-260`
+  (`changeLog`) and `schema.ts:277-285` (`requestLog`). An `INSERT INTO
+  change_log (id, data) VALUES (...)` (or `request_log` equivalent) omits
+  every one of those `NOT NULL` columns — SQLite/D1 rejects it deterministically,
+  not conditionally, on every single call.
+- **Why this wasn't caught by the already-applied `kind` fix**: `packages/core/src/logging.ts:164-175`
+  (`ChangeLogEntry.kind`) and `logging.ts:279-286` (`RequestLogEntry.kind`)
+  already carry a prior bugfix (see their own inline `// BUGFIX` comments)
+  correcting `Storable.kind` so `tableFor()` resolves the right table at all
+  — that fix stopped a `NOT_FOUND "unknown table for kind"` error. It did
+  **not** address `D1Storage.save()`'s column-population gap for those two
+  tables, which is a separate bug one layer down: the table now resolves
+  correctly, but the generic fallback's `INSERT` still can't satisfy the
+  schema's `NOT NULL` constraints.
+- **Why it's silent in production**: both call sites swallow the failure —
+  `logging.ts:227-233` (`ChangeLoggingStorage.save()`) does
+  `this._changeLogStorage.save(...).catch((err) => console.error(...))`
+  fire-and-forget, and `logging.ts:327-333` (`RequestLogger.log()`) wraps the
+  same call in `try/catch` → `console.error(...)`. Neither propagates the
+  failure to the request path — a live deployment would see the constraint
+  violation only in Worker logs (if anyone's watching), never a user-visible
+  error, never a thrown exception the caller must handle.
+- **Compliance impact**: **directly undermines C4's audit-trail claim above**
+  — if every `change_log`/`request_log` write throws a `NOT NULL` constraint
+  violation in the real D1 database (not the `MemoryStorage`/mock backends
+  Phase 2's tests use), the audit trail this register credits as "broad
+  coverage" (`this.log(...)` called at 25+ points) may be **silently empty in
+  production self-hosted-on-Cloudflare deployments**, the same failure mode
+  the adjacent `// BUGFIX` comments already document once for the `kind`
+  mismatch. It also means **C2's retention cron (Phase 3) has nothing to
+  prune** — deleting rows older than the retention window from a table that
+  was never successfully written to is a no-op, not a fix, for the compliance
+  posture the cron was meant to protect.
+- **Not fixed here — genuinely out of scope**: this is a pre-existing bug
+  unrelated to any of this change's 4 ADRs (attachment cascade-delete,
+  retention cron scheduling, SBOM unblock, CI SHA-pinning); fixing
+  `D1Storage.save()`'s generic fallback (mirroring the `key_store_entries`
+  pattern at `d1.ts:284-290` — add a `tableName === "change_log"`/`"request_log"`
+  branch populating the real columns) is itself a small, mechanical, low-risk
+  fix, but it was discovered after Phase 3's fix-verification exercise, not
+  planned as one of this change's ADRs, and deserves its own dedicated
+  verification pass (real `wrangler d1 execute --local` write + `SELECT`,
+  not just a `tsc` pass) rather than being folded in unreviewed. Recommend a
+  dedicated follow-up change.
+
 ---
 
 ## Legal/Business Judgment — Not Resolved Here
@@ -450,6 +557,7 @@ legal or business decision this review explicitly does not make.
 | L1 — AGPL/GPL-3.0 mismatch | `OUT OF SCOPE — legal/business judgment` — never silently resolved |
 | L2 — `nginx/Dockerfile` modernization | `OUT OF SCOPE — legal/business judgment` — documented recommendation only |
 | S2, S4, S7, S8, S9, C3, C4, C5, C6, C7 | `OPEN` (informational) — unchanged, no fix planned this change |
+| C8 — `D1Storage` generic save fallback omits `change_log`/`request_log` `NOT NULL` columns | `DISCLOSED — OUT OF SCOPE for this change` (found during Phase 3 verification; recommend a dedicated fix in a future change) |
 
 ## Scope Disclosure
 
