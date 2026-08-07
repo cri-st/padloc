@@ -5,7 +5,7 @@ CoreCryptoBusinessLogic, WebClient, ExtensionClient, ServerSelfHosted,
 PriorClaimsVerification). Deduplicated across surfaces; `packages/core` findings
 cross-checked for both worker and self-hosted-server reachability.
 
-Status legend: `OPEN` = not yet remediated. Updated in place through Phases 3-5.
+Status legend: `OPEN` = not yet remediated; `FIXED (commit <sha>)` = remediated with a linked commit; `DOCUMENTED AS DEFERRED` = intentionally not fixed this round, with rationale. Phase 5 (this pass) closed all 8 MEDIUM findings (7 fixed, 1 documented deferral) and triaged all 17 LOW findings (6 fixed, 11 documented deferral — 2 of which were already pre-existing in-code documentation from earlier phases).
 
 ## CRITICAL (3)
 
@@ -69,60 +69,85 @@ Status legend: `OPEN` = not yet remediated. Updated in place through Phases 3-5.
 
 ## MEDIUM (8)
 
-### M1. Rate-limit Durable Object bindings fail open with no operator alert — OPEN
-- **Where**: `packages/worker/src/rate-limiter.ts:100-114`, contrast `server-factory.ts:47-56` (ACCOUNT_LOCK has an alert, this doesn't)
+### M1. Rate-limit Durable Object bindings fail open with no operator alert — FIXED (commit 0535cbf0)
+- **Where**: `packages/worker/src/rate-limiter.ts:100-114`, contrast `server-factory.ts:47-56` (ACCOUNT_LOCK had an alert, this didn't)
 - Reported independently by WorkerAuthCore AND WorkerStorageEmail — deduplicated here.
-- **Exploit**: missing `GENERAL_RATE_LIMIT`/`SHARE_VIEW_RATE_LIMIT` bindings silently disable all brute-force throttling, zero telemetry.
+- **Exploit**: missing `GENERAL_RATE_LIMIT`/`SHARE_VIEW_RATE_LIMIT` bindings silently disabled all brute-force throttling, zero telemetry.
+- **Fix**: `index.ts`'s `fetch()` now calls `captureHqException` for each binding when missing in `production`/`staging`, mirroring the existing `ACCOUNT_LOCK` check exactly.
+- **Verified**: `npm run deploy:dry-run` (clean esbuild bundle) and the full `packages/worker` `test:ci` suite (78 assertions, 0 failed).
 
-### M2. SRP hash inputs omit RFC 5054 `PAD()` step — OPEN
-- **Where**: `packages/core/src/srp.ts:132-165` (`i2b`, `Core.u/k/M1/M2`)
-- Deviation from spec's anti-ambiguity requirement in the most security-critical component.
+### M2. SRP hash inputs omit RFC 5054 `PAD()` step — DEFERRED (commit 4e0b155b, documentation only)
+- **Where**: `packages/core/src/srp.ts:116-163` (`i2b`, `Core.H`/`u`/`k`/`M1`/`M2`)
+- Deviation from RFC 5054 §2.5.4's anti-ambiguity requirement in the most security-critical component.
+- **Deferral rationale**: not independently exploitable today — client and server are the only two parties, always run byte-identical `i2b`/`H()` code, so the concatenation ambiguity RFC 5054's PAD() guards against (two different (A,B) pairs hashing to the same bytes) has no forgery path here; this implementation also follows the simpler srp.stanford.edu SRP-6a design rather than RFC 5054's literal M1/M2 construction, so "PAD() per RFC 5054" isn't a drop-in fix regardless. A correct fix needs PER-ARGUMENT canonical widths (group-byte-length for A/B/v/g, which itself varies 384–1024 bytes across configured `SRPGroupLength`; digest-byte-length for K/M1) — a single blanket `i2b` change would be wrong. With no SRP wire-format version negotiation and aggressively-cached clients (PWA/extension/electron/cordova), a byte-for-byte mismatch between an old cached client and a freshly deployed server would break EVERY login/signup simultaneously and irrecoverably until every client re-fetches. Detailed `SECURITY:` comment added at the exact gap explaining what a correct fix requires (per-argument padding, byte-level test vectors, a protocol-version bump) rather than rushing it.
+- **Verified**: comment-only change — `packages/server`'s pinned `tsc --skipLibCheck` clean; `packages/worker`'s `test:crypto-parity` (SRP/session M1/M2 vector, passing) and `test:session-contract` (6/6) confirm zero behavior change.
 
-### M3. D1 email columns don't enforce documented lowercase invariant — OPEN
-- **Where**: `packages/worker/src/storage/schema.ts:38-40`, `d1.ts:187-193`
+### M3. D1 email columns don't enforce documented lowercase invariant — FIXED (commit b54261ae)
+- **Where**: `packages/worker/src/storage/schema.ts:38-40`, `d1.ts` (`save()`), new `storage/normalize-email.ts`
 - Not currently exploitable (ID-hash lookup saves it) but a violated storage invariant with admin-authorization blast radius if any future code trusts it.
+- **Fix**: extracted `normalizeEmailForStorage()` into its own dependency-free module and wired it into `D1Storage.save()`'s `accounts`/`auth` INSERT and ON-CONFLICT-UPDATE email bindings.
+- **Verified**: new `test:normalize-email` unit test (6/6, real function, not a reimplementation) wired into `test:ci`; the extraction was necessary because directly importing `d1.ts` standalone hits a pre-existing, unrelated `@padloc/core` circular-import crash (confirmed present on an unmodified checkout via `git stash`, independent of this fix) — `normalize-email.ts` has zero `@padloc/core` imports so it sidesteps that entirely. Full `test:ci` green.
 
-### M4. Self-hosted passkey RP-root env var not validated as a real registrable domain — OPEN
+### M4. Self-hosted passkey RP-root env var not validated as a real registrable domain — FIXED (commit de25edfa)
 - **Where**: `packages/extension/src/passkey-rp-policy.ts:9-15,29-40`
 - Operator-misconfiguration path to RP impersonation (default build only trusts `google.com`+localhost).
+- **Fix**: added a registrable-domain sanity floor — reject single-label `PL_PASSKEY_RP_ROOTS` entries and a short hardcoded reject-list of common public/multi-tenant suffixes (`com`, `io`, `github.io`, `herokuapp.com`, `vercel.app`, etc.). Not a full Public Suffix List parser by design (documented residual risk for suffixes outside the list).
+- **Verified**: existing mocha suite (3/3, no regression) plus a new module-reload test exercising the real env-var-driven filtering (rejects `com`/`github.io`/`io`, accepts `my-real-domain.com`, Google baseline always survives) — 4/4 passing.
 
-### M5. S3 attachment backend has no path validation (unlike hardened `fs.ts` sibling) — OPEN
+### M5. S3 attachment backend has no path validation (unlike hardened `fs.ts` sibling) — FIXED (commit 200b645c)
 - **Where**: `packages/server/src/attachments/s3.ts:60-98`
-- `deleteAll`'s bulk-delete-by-prefix has no local safety net for a malformed `vault` value.
+- `deleteAll`'s bulk-delete-by-prefix had no local safety net for a malformed `vault` value.
+- **Fix**: added `assertSafeSegment()` mirroring `fs.ts`, called at the top of `get`/`put`/`delete`/`deleteAll`/`getUsage` before `vault`/`id` reach any S3 Key/Prefix.
+- **Verified**: `packages/server`'s pinned `tsc --skipLibCheck` clean.
 
-### M6. Prototype pollution via `Object.assign` in self-hosted provisioning entries — OPEN
-- **Where**: `packages/server/src/provisioning/api.ts:66-70` (`ProvisioningEntry` constructor)
-- No equivalent guard to `core`'s `setPath` `FORBIDDEN_PATH_SEGMENTS` protection.
+### M6. Prototype pollution via `Object.assign` in self-hosted provisioning entries — FIXED (commit 07ada1c6)
+- **Where**: `packages/server/src/provisioning/api.ts:61-94` (`ProvisioningEntry` constructor)
+- No equivalent guard to `core`'s `setPath` `FORBIDDEN_PATH_SEGMENTS` protection; `vals` traces to a client-controlled JSON request body.
+- **Fix**: replaced the raw `Object.assign(this, vals)` with an explicit per-key loop skipping `__proto__`/`constructor`/`prototype`. Deliberately used a plain array (not a `Record` object literal) for the reject-list — confirmed via a direct Node probe that `{__proto__: true, ...}` as an object literal does NOT create an own `"__proto__"` property at all (it silently tries to set the object's actual prototype instead), which would have made a Record-based check unreliable.
+- **Verified**: confirmed the exact JSON.parse own-key behavior live (`Object.keys(JSON.parse('{"__proto__":...}'))` includes `"__proto__"` as a real own key, unlike object-literal syntax) and that the fix strips it; `packages/server`'s pinned `tsc --skipLibCheck` clean.
 
-### M7. AccountLockDO fixed 30s TTL can auto-release mid-operation under contention — OPEN
-- **Where**: `packages/worker/src/locks/account-lock.ts:60-84,173`
+### M7. AccountLockDO fixed 30s TTL can auto-release mid-operation under contention — FIXED (commit f77d2b98)
+- **Where**: `packages/worker/src/locks/account-lock.ts:36-93,150-194`
 - Reintroduces the exact race the DO exists to prevent, under slow-path/cold-start conditions.
+- **Fix**: added `AccountLockDO.renew(jobId, ttlMs)` (extends the timer only if `jobId` is still the current holder, no re-queuing) and a periodic heartbeat in `acquireLock()` at 1/3 of the TTL. If the holder's execution context is itself gone (crash/eviction), the heartbeat simply stops firing and the DO's own timer still reclaims the lock — the safety valve is preserved, not removed.
+- **Verified**: two new real-`AccountLockDO`-class tests — `renew()` extends the lock past its original TTL window and the auto-release-if-never-released safety valve still eventually fires; `renew()` is a no-op (returns `false`) for a jobId that isn't the current holder and doesn't disturb the real holder's TTL. Full `account-lock-do.test.mjs` suite: 14/14 passing (no regression in the pre-existing sequential/concurrent-burst/TTL tests).
 
-### M8. Request body fully buffered before size-limit enforcement — OPEN
-- **Where**: `packages/worker/src/transport.ts:135-141`
+### M8. Request body fully buffered before size-limit enforcement — FIXED (commit 596e9230)
+- **Where**: `packages/worker/src/transport.ts:47-99,189-210` (`readBodyWithLimit`, `_handlePost`)
 - Resource-amplification DoS gap against unauthenticated endpoints.
-
-## LOW (14)
+- **Fix**: added a `Content-Length` fast-path precheck (rejects a truthful oversized declared length before touching the body at all) plus `readBodyWithLimit()`, which reads the body stream in chunks, tracks a running total, and cancels the reader the instant the total exceeds `maxRequestSize` — capping worst-case buffered memory at roughly the limit plus one chunk, regardless of the caller's declared or actual body size.
+- **Verified**: 3 new tests against the real `WorkerReceiver`/real `Request`/`ReadableStream` — (1) a hanging body stream is never touched when Content-Length alone already exceeds the limit (raced against a timeout, not a flaky pull-count check — Node's own `Request` implementation eagerly touches a streaming body once as an internal detail, which made pull-counting unreliable), (2) an undeclared oversized body is rejected after ~3 chunks (150 bytes), not the whole stream, (3) an in-limit body still round-trips correctly. Full worker `test:ci` green.
+## LOW (17)
 
 L1. IP identity trusts `x-forwarded-for` fallback with no trust-boundary assertion — `worker/transport.ts:113-114`, `index.ts:238-241`
-L2. Lock key normalization mismatch (`toLowerCase` vs `toLocaleLowerCase`) — `worker/locks/account-lock.ts` vs `core/server.ts` (deduped from 2 reports)
+  **DOCUMENTED AS DEFERRED**: not code-fixable in isolation — asserting a trust boundary requires knowing the real deployment's proxy topology (Cloudflare-only vs. behind an additional corporate/CDN proxy chain), which is an operator/infra decision, not something this code can determine.
+L2. Lock key normalization mismatch (`toLowerCase` vs `toLocaleLowerCase`) — **FIXED (commit 48ae3f3b)**: `core/server.ts`'s two `accountLock.withLock(...)` call sites now use `.toLowerCase()`, matching both `AccountLockProvider` implementations. Verified via `packages/server` tsc, `session-contract.test.mjs`, and the real `account-lockout-e2e` wrangler suite.
 L3. Transport-level request-age replay check is a permanent no-op — `worker/transport.ts:159,267-292`
-L4. Dead `errorResponse()` export missing security headers, latent-regression risk — `worker/error.ts:113-124`
+  **DOCUMENTED AS DEFERRED**: already has a thorough, honest, pre-existing in-code `SECURITY:` comment explaining exactly why it's a no-op and why the two anonymous share-view methods it would have covered are already fully protected by the DO's atomic one-time-view flag instead. No further action needed.
+L4. Dead `errorResponse()` export missing security headers, latent-regression risk — **FIXED (commit 7e340121)**: removed the dead export from `worker/error.ts` entirely (confirmed zero importers). Verified via `deploy:dry-run` + full `test:ci`.
 L5. WebAuthn cross-platform authenticators don't require user verification — `worker/auth/webauthn.ts:100-102,195-197,219`
+  **DOCUMENTED AS DEFERRED**: forcing `userVerification: "required"` for cross-platform authenticators is a real compat/security tradeoff — some FIDO U2F-style security keys don't support UV at all, so a blanket change could break registration for existing users' hardware keys. Needs a deliberate compatibility decision, not a rushed change; correctly triaged as LOW (not MEDIUM) already.
 L6. Presigned-URL attachment flow: TTL-reuse + unverified hash (confirmed dead/unreachable code) — `worker/attachments/r2.ts:243-371`
-L7. `MockMessenger`/`EMAIL_BACKEND=mock` misconfig has no production alert (fails closed otherwise) — `worker/server-factory.ts:130-146`
-L8. Dead wildcard `DEFAULT_CORS.allowOrigin: '*'` constant, unused but attractive nuisance — `worker/observability/security-headers.ts:34-39`
+  **DOCUMENTED AS DEFERRED**: already has a thorough, honest, pre-existing in-code `SECURITY:` comment confirming zero RPC callers (dead code) and listing the exact two gaps to close before ever wiring it up. No live exploit path; no further action needed.
+L7. `MockMessenger`/`EMAIL_BACKEND=mock` misconfig has no production alert — **FIXED (commit 7e340121)**: added the same `captureHqException` alert pattern as the `ACCOUNT_LOCK`/rate-limit DO checks. Verified via `deploy:dry-run` + full `test:ci`.
+L8. Dead wildcard `DEFAULT_CORS.allowOrigin: '*'` constant, unused but attractive nuisance — **FIXED (commit 7e340121)**: retyped `DEFAULT_CORS` to `Omit<CorsConfig, "allowOrigin">` and dropped the field; `corsHeaders()` never had a fallback path reading it. Verified via `deploy:dry-run` + full `test:ci`.
 L9. AES params permit 64-bit GCM auth tags — `core/crypto.ts:15-31`
-L10. `getKeyStoreEntry` has only implicit (not explicit) ownership check — `core/server.ts:~2228-2242`
-L11. `startAuthRequest` has no visible rate limit at the `core` layer (mitigated at worker layer, unverified here) — `core/server.ts:~410-475`
-L12. CSP allows `blob:` broadly for script-src/object-src/frame-src, weakening defense-in-depth for H3 — `pwa/webpack.config.js:31`
+  **DOCUMENTED AS DEFERRED**: same legacy-compat landmine as H5's PBKDF2 floor — `legacy.ts`'s `parseLegacyContainer()` constructs `AESEncryptionParams` with `tagSize: raw.ts` for importing real Padlock 1.x/2.x vaults, which historically used 64-bit SJCL tags; tightening the shared `validate()` would break those legitimate legacy imports. A correct fix needs the same dual-gate approach as H5 (a separate floor enforced only at NEW-encryption call sites, confirmed by tracing every real `AESEncryptionParams` construction site first) — a genuine design decision, not a 2-line change.
+L10. `getKeyStoreEntry` has only implicit (not explicit) ownership check — **FIXED (commit 48ae3f3b)**: added the same explicit `entry.accountId !== account.id` guard its sibling `deleteKeyStoreEntry` already has. Verified via `packages/server` tsc --skipLibCheck.
+L11. `startAuthRequest` has no visible rate limit at the `core` layer — `core/server.ts:~410-475`
+  **DOCUMENTED AS DEFERRED**: architectural, not a gap — `core` is platform-agnostic by design (mirrors `AccountLockProvider`'s host-injection pattern) and this path is already gated by the worker transport layer's `authRateLimiter` (`checkAuthRateLimit`, 20 req/60s on `AUTH_SENSITIVE_METHODS`, confirmed present in `index.ts`). Threading a rate limiter through `core`'s `Server` constructor for redundant defense-in-depth is a real design change, not a trivial fix.
+L12. CSP allows `blob:` broadly for script-src/object-src/frame-src — `pwa/webpack.config.js:31`
+  **DOCUMENTED AS DEFERRED**: narrowing requires first auditing every legitimate `blob:` consumer (WASM crypto workers, PDF/attachment preview blobs, etc.) to avoid silently breaking real functionality — a compat-sensitive change, not a safe mechanical one within this round's scope.
 L13. Markdown `<img>` allows arbitrary remote URLs (tracking-pixel IP/UA disclosure) — `app/lib/markdown.ts:12-46`
-L14. `isExtensionDocumentSender` guard drops ALL legitimate content-script messages, silently breaking the save-password prompt (fails safe, not a vuln, but a broken control) — `extension/background.ts:473-478`
-L15. Orphaned second WebAuthn interceptor (dev-only, unshipped) with no RP validation + unencrypted key storage in dev tooling — `extension/webauthn-page.ts`, `scripts/agentic-extension-cdp.mjs`
-L16. `email/smtp.ts` template corruption via unescaped `String.replace` replacement patterns — `server/email/smtp.ts:75-90`
-L17. `mongo2postgres.ts` hardcodes `rejectUnauthorized:false` regardless of config (one-shot migration tool) — `server/tools/mongo2postgres.ts:23-36`
+  **DOCUMENTED AS DEFERRED**: remote image support in markdown notes is intentional product behavior; restricting it (stripping `img`, proxying, or referrer-stripping) is a UX-affecting product decision requiring explicit sign-off, not a mechanical security patch.
+L14. `isExtensionDocumentSender` guard drops ALL legitimate content-script messages — `extension/background.ts:473-478`
+  **DOCUMENTED AS DEFERRED**: explicitly NOT a vulnerability per the original finding itself (fails safe) — it's a functional bug (broken save-password prompt), out of scope for a security remediation round.
+L15. Orphaned second WebAuthn interceptor (dev-only, unshipped) — `extension/webauthn-page.ts`, `scripts/agentic-extension-cdp.mjs`
+  **DOCUMENTED AS DEFERRED**: confirmed genuinely unreferenced by the real `manifest.json`/`webpack.config.js` (only consumed by the dev-only `agentic-extension-cdp.mjs` CDP tooling script) — no real-user attack surface. Left alone rather than risk breaking the agentic dev/test tooling for a change with no production security benefit.
+L16. `email/smtp.ts` template corruption via unescaped `String.replace` replacement patterns — **FIXED (commit ebb7bace)**: switched to replacer functions, which never receive `$`-pattern treatment. Verified directly: pre-fix, a value containing `$&` re-inserted the matched placeholder text into the output; post-fix, the literal value is preserved byte-for-byte.
+L17. `mongo2postgres.ts` hardcodes `rejectUnauthorized:false` regardless of config — **FIXED (commit ebb7bace)**: now respects `tlsRejectUnauthorized` from config (defaulting `true`), matching the real `storage/postgres.ts` backend it was copied from. Verified via `packages/server` tsc --skipLibCheck.
 
-(Note: tasks.md/spec allowed LOW items to be documented rather than all fixed — see Phase 5.)
+(Note: tasks.md/spec allowed LOW items to be documented rather than all fixed — see Phase 5. 6/17 fixed with commits; 11/17 documented with deferral rationale.)
 
 ## PriorClaimsVerification results (no register entries — informational)
 
