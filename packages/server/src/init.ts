@@ -382,6 +382,33 @@ async function init(config: PadlocConfig) {
         }
         process.exit(1);
     });
+
+    // SECURITY: unlike `uncaughtException` above (which mirrors corrupted
+    // process state and legitimately warrants a restart), an unhandled
+    // promise rejection here almost always means a missed `.catch()` on a
+    // single request's async chain -- HTTPReceiver.listen's callback
+    // (packages/server/src/transport/http.ts) now try/catches its ENTIRE
+    // body, so the failing request has already errored back to its caller
+    // by the time this fires. The process itself is not corrupted. Calling
+    // `process.exit()` here would let ANY missed `.catch()` on a per-request
+    // code path become a trivial remote single-request DoS against the
+    // whole server -- log + best-effort admin email only, and deliberately
+    // do NOT exit. Do not "fix" this into a `process.exit()` mirror of
+    // `uncaughtException` without re-reading this rationale.
+    process.on("unhandledRejection", async (reason: unknown) => {
+        const message = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
+        console.error("unhandled rejection: ", message);
+        if (config.server.reportErrors) {
+            try {
+                await emailSender.send(
+                    config.server.reportErrors,
+                    new PlainMessage({
+                        message: `An unhandled promise rejection occured at ${new Date().toISOString()}:\n${message}`,
+                    })
+                );
+            } catch (e) {}
+        }
+    });
 }
 
 async function start() {

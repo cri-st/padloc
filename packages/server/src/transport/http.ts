@@ -70,59 +70,76 @@ export class HTTPReceiver implements Receiver {
             );
         }
         const server = createServer(async (httpReq, httpRes) => {
-            httpRes.on("error", (e) => {
-                // todo
-                console.error(e);
-            });
+            try {
+                httpRes.on("error", (e) => {
+                    // todo
+                    console.error(e);
+                });
 
-            httpRes.setHeader("Access-Control-Allow-Origin", this.config.allowOrigin);
-            httpRes.setHeader("Access-Control-Allow-Methods", "OPTIONS, POST");
-            httpRes.setHeader("Access-Control-Allow-Headers", "Content-Type");
+                httpRes.setHeader("Access-Control-Allow-Origin", this.config.allowOrigin);
+                httpRes.setHeader("Access-Control-Allow-Methods", "OPTIONS, POST");
+                httpRes.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-            switch (httpReq.method) {
-                case "OPTIONS":
-                    httpRes.end();
-                    break;
-                case "GET":
-                    // httpReq.url will include searchParams, so we parse the pathname properly
-                    const url = new URL(`http://localhost${httpReq.url || ""}`);
-                    if (url.pathname === this.config.healthCheckPath) {
-                        httpRes.statusCode = 200;
-                    } else {
-                        // Legacy server response for GET requests
+                switch (httpReq.method) {
+                    case "OPTIONS":
+                        httpRes.end();
+                        break;
+                    case "GET":
+                        // httpReq.url will include searchParams, so we parse the pathname properly
+                        const url = new URL(`http://localhost${httpReq.url || ""}`);
+                        if (url.pathname === this.config.healthCheckPath) {
+                            httpRes.statusCode = 200;
+                        } else {
+                            // Legacy server response for GET requests
+                            httpRes.statusCode = 405;
+                        }
+                        httpRes.end();
+                        break;
+                    case "POST":
+                        try {
+                            const body = await readBody(httpReq, this.config.maxRequestSize);
+                            const req = new Request().fromRaw(unmarshal(body));
+                            const ipAddress = httpReq.headers["x-forwarded-for"] || httpReq.socket?.remoteAddress;
+                            req.ipAddress = Array.isArray(ipAddress) ? ipAddress[0] : ipAddress;
+                            const location = req.ipAddress && (await getLocation(req.ipAddress));
+                            req.location = location
+                                ? {
+                                      country: location.country?.names["en"],
+                                      city: location.city?.names["en"],
+                                  }
+                                : undefined;
+
+                            const clientVersion = (req.device && req.device.appVersion) || undefined;
+                            const res = await handler(req);
+                            const resBody = marshal(res.toRaw(clientVersion));
+                            httpRes.setHeader("Content-Type", "application/json; charset=utf-8");
+                            httpRes.setHeader("Content-Length", Buffer.byteLength(resBody));
+                            httpRes.write(resBody);
+                        } catch (error) {
+                            console.error(error);
+                            httpRes.statusCode = 400;
+                        }
+                        httpRes.end();
+                        break;
+                    default:
                         httpRes.statusCode = 405;
-                    }
+                        httpRes.end();
+                }
+            } catch (error) {
+                // SECURITY: this outer try/catch guards the ENTIRE request-handling
+                // path, not just the POST branch's body-parsing/handler call above.
+                // Without it, a thrown error anywhere else in the callback (e.g. GET's
+                // URL parsing, header assignment) escapes uncaught inside an async
+                // `createServer` callback, which Node surfaces as an unhandled
+                // rejection rather than a per-request error -- previously that could
+                // crash the process for a single malformed request.
+                console.error(error);
+                if (!httpRes.headersSent) {
+                    httpRes.statusCode = 500;
+                }
+                if (!httpRes.writableEnded) {
                     httpRes.end();
-                    break;
-                case "POST":
-                    try {
-                        const body = await readBody(httpReq, this.config.maxRequestSize);
-                        const req = new Request().fromRaw(unmarshal(body));
-                        const ipAddress = httpReq.headers["x-forwarded-for"] || httpReq.socket?.remoteAddress;
-                        req.ipAddress = Array.isArray(ipAddress) ? ipAddress[0] : ipAddress;
-                        const location = req.ipAddress && (await getLocation(req.ipAddress));
-                        req.location = location
-                            ? {
-                                  country: location.country?.names["en"],
-                                  city: location.city?.names["en"],
-                              }
-                            : undefined;
-
-                        const clientVersion = (req.device && req.device.appVersion) || undefined;
-                        const res = await handler(req);
-                        const resBody = marshal(res.toRaw(clientVersion));
-                        httpRes.setHeader("Content-Type", "application/json; charset=utf-8");
-                        httpRes.setHeader("Content-Length", Buffer.byteLength(resBody));
-                        httpRes.write(resBody);
-                    } catch (error) {
-                        console.error(error);
-                        httpRes.statusCode = 400;
-                    }
-                    httpRes.end();
-                    break;
-                default:
-                    httpRes.statusCode = 405;
-                    httpRes.end();
+                }
             }
         });
 
