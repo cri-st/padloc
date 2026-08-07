@@ -11,6 +11,25 @@ import {
 } from "@aws-sdk/client-s3";
 import { Readable } from "stream";
 import { Config, ConfigParam } from "@padloc/core/src/config";
+import { Err, ErrorCode } from "@padloc/core/src/error";
+
+// SECURITY: `vault`/`id` are free-text, client-influenced fields (mirrors
+// the fs.ts attachment backend's hardening -- see that file's
+// SAFE_SEGMENT comment for the filesystem-traversal variant of this
+// issue). S3 has no real directory traversal since Key is just a flat
+// string, but an unrestricted `vault` value still lets a caller build an
+// S3 Key/Prefix that reaches into another vault's object space, or,
+// worse, an empty/overly-broad `vault` value passed to `deleteAll`'s
+// Prefix would bulk-delete far more objects than intended (Prefix: ""
+// matches the ENTIRE bucket). Restricting every segment to a safe
+// identifier shape before it reaches the S3 client closes both.
+const SAFE_SEGMENT = /^[a-zA-Z0-9_-]+$/;
+
+function assertSafeSegment(value: string, label: string) {
+    if (typeof value !== "string" || !SAFE_SEGMENT.test(value)) {
+        throw new Err(ErrorCode.BAD_REQUEST, `Invalid ${label}.`);
+    }
+}
 
 function streamToBytes(stream: Readable): Promise<Uint8Array> {
     return new Promise<Uint8Array>((resolve, reject) => {
@@ -53,6 +72,8 @@ export class S3AttachmentStorage implements AttachmentStorage {
     }
 
     async get(vault: VaultID, id: AttachmentID) {
+        assertSafeSegment(vault, "vault id");
+        assertSafeSegment(id, "attachment id");
         const obj = await this._client.send(
             new GetObjectCommand({
                 Bucket: this.config.bucket,
@@ -65,6 +86,8 @@ export class S3AttachmentStorage implements AttachmentStorage {
     }
 
     async put(att: Attachment) {
+        assertSafeSegment(att.vault, "vault id");
+        assertSafeSegment(att.id, "attachment id");
         await this._client.send(
             new PutObjectCommand({
                 Bucket: this.config.bucket,
@@ -75,6 +98,8 @@ export class S3AttachmentStorage implements AttachmentStorage {
     }
 
     async delete(vault: VaultID, id: AttachmentID) {
+        assertSafeSegment(vault, "vault id");
+        assertSafeSegment(id, "attachment id");
         await this._client.send(
             new DeleteObjectCommand({
                 Bucket: this.config.bucket,
@@ -84,6 +109,7 @@ export class S3AttachmentStorage implements AttachmentStorage {
     }
 
     async deleteAll(vault: VaultID) {
+        assertSafeSegment(vault, "vault id");
         const list = await this._client.send(
             new ListObjectsCommand({
                 Bucket: this.config.bucket,
@@ -102,6 +128,7 @@ export class S3AttachmentStorage implements AttachmentStorage {
     }
 
     async getUsage(vault: VaultID): Promise<number> {
+        assertSafeSegment(vault, "vault id");
         const list = await this._client.send(
             new ListObjectsCommand({
                 Bucket: this.config.bucket,
