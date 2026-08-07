@@ -33,6 +33,7 @@ import {
     changeLog,
     requestLog,
 } from "./schema";
+import { normalizeEmailForStorage } from "./normalize-email";
 
 // ──────────────────────────────────────────────────────────────
 // Table map — kind → Drizzle table
@@ -176,7 +177,19 @@ export class D1Storage implements Storage {
                 // D1's SQLite rejects. Use raw SQL via the underlying D1 client.
                 // Also extract denormalized columns from the raw data for indexed lookups.
                 const tableName = getTableName(tbl);
-                const email = (raw as any).email || null;
+                // SECURITY: `schema.ts` documents `email` as "stored
+                // lowercased" (accounts.email has a unique index on it),
+                // but `raw.email` is caller-controlled (traces back to
+                // Account.email, settable at signup/update). Without this
+                // normalization, "User@Example.com" and "user@example.com"
+                // would collide in application logic (which always
+                // lowercases lookups) while landing as two visually
+                // distinct rows here -- not currently exploitable since
+                // lookups go through the ID-hash of the lowercased email,
+                // but a violated storage invariant with an admin-facing
+                // blast radius the moment any future code trusts this
+                // column's casing directly (e.g. a raw SQL admin query).
+                const email = normalizeEmailForStorage((raw as Record<string, unknown>).email);
                 const createdAt = (raw as any).created || (raw as any).created_at || new Date().toISOString();
                 const updatedAt = (raw as any).updated || (raw as any).updated_at || new Date().toISOString();
 
