@@ -1,4 +1,5 @@
 import { expect } from "chai";
+import type * as PasskeyRpPolicyModule from "../src/passkey-rp-policy";
 import { approvePasskeyRpSuffix, isPasskeyProviderOriginEnabled } from "../src/passkey-rp-policy";
 
 suite("Passkey RP canary policy", () => {
@@ -25,5 +26,29 @@ suite("Passkey RP canary policy", () => {
         expect(approvePasskeyRpSuffix("com", "accounts.google.com")).to.equal(false);
         expect(approvePasskeyRpSuffix("google.com", "google.com.attacker.example")).to.equal(false);
         expect(approvePasskeyRpSuffix("attacker-google.com", "attacker-google.com")).to.equal(false);
+    });
+
+    test("PL_PASSKEY_RP_ROOTS rejects bare public suffixes and known multi-tenant hosts (M4)", () => {
+        const previous = process.env.PL_PASSKEY_RP_ROOTS;
+        const modulePath = require.resolve("../src/passkey-rp-policy");
+        try {
+            process.env.PL_PASSKEY_RP_ROOTS = "com,github.io,io,my-real-domain.com";
+            delete require.cache[modulePath];
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const reloaded = require("../src/passkey-rp-policy") as typeof PasskeyRpPolicyModule;
+            expect(reloaded.PASSKEY_APPROVED_RP_ROOTS).to.include("my-real-domain.com");
+            expect(reloaded.PASSKEY_APPROVED_RP_ROOTS).to.not.include("com");
+            expect(reloaded.PASSKEY_APPROVED_RP_ROOTS).to.not.include("github.io");
+            expect(reloaded.PASSKEY_APPROVED_RP_ROOTS).to.not.include("io");
+            // Google baseline always survives regardless of operator config.
+            expect(reloaded.PASSKEY_APPROVED_RP_ROOTS).to.include("google.com");
+        } finally {
+            if (previous === undefined) {
+                delete process.env.PL_PASSKEY_RP_ROOTS;
+            } else {
+                process.env.PL_PASSKEY_RP_ROOTS = previous;
+            }
+            delete require.cache[modulePath];
+        }
     });
 });
