@@ -58,10 +58,32 @@ interface ProvisioningRequest {
     updates: ProvisioningUpdate[];
 }
 
+// SECURITY: mirrors `core/util.ts`'s `setPath` FORBIDDEN_PATH_SEGMENTS
+// guard. `vals` here traces back to fully client-controlled JSON request
+// bodies (`ApiProvisioner._handleUpdateRequest`'s `defaultProv`, parsed
+// straight from an authenticated but still untrusted HTTP request).
+// `Object.assign(this, vals)` with a "__proto__" key invokes the
+// inherited accessor setter and reassigns THIS instance's own prototype
+// (e.g. to `null`, breaking every inherited method including the
+// `toRaw()` serialization this entry needs to be persisted); a
+// "constructor"/"prototype" key overwrite stages further gadget attacks.
+// Filtering these keys before assigning closes the same bug class
+// `setPath` already guards against for SCIM PATCH.
+// A plain array (not a `Record`/object-literal lookup) is used
+// deliberately: an object literal with a `__proto__` key does NOT create
+// an own "__proto__" property at all -- it sets the object's actual
+// prototype instead, silently dropping the intended membership check.
+const FORBIDDEN_ASSIGN_KEYS = ["__proto__", "constructor", "prototype"];
+
 export class ProvisioningEntry extends Provisioning {
     constructor(vals: Partial<ProvisioningEntry> = {}) {
         super();
-        Object.assign(this, vals);
+        const target = this as Record<string, unknown>;
+        for (const [key, value] of Object.entries(vals)) {
+            if (!FORBIDDEN_ASSIGN_KEYS.includes(key)) {
+                target[key] = value;
+            }
+        }
     }
 
     id: string = "";
