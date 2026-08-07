@@ -10,11 +10,30 @@ export interface BrokerItemSource {
     item: VaultItem;
 }
 
+export interface BrokerTabBinding {
+    tabId: number;
+    origin: string;
+}
+
+export function originOf(url: string): string | null {
+    try {
+        return new URL(url).origin;
+    } catch {
+        return null;
+    }
+}
+
+export function isBrokerTabBindingCurrent(binding: BrokerTabBinding, tab: { id?: number; url?: string }): boolean {
+    if (tab.id !== binding.tabId || !tab.url) return false;
+    return originOf(tab.url) === binding.origin;
+}
+
 export interface PendingBrokerPlan {
     planId: string;
     request: AutofillBrokerRequest;
     fields: AutofillBrokerPlanField[];
     createdAt: number;
+    tabBinding?: BrokerTabBinding;
 }
 
 export interface BrokerApproval {
@@ -27,12 +46,13 @@ export interface BrokerApproval {
 export function buildUnlockedBrokerPlanResponse(
     request: AutofillBrokerRequest,
     items: BrokerItemSource[],
+    tabBinding?: BrokerTabBinding,
     now = Date.now()
 ): { response: AutofillBrokerResponse; pendingPlan: PendingBrokerPlan } {
     const binding = requireBinding(request);
     const fields = collectMatchingFields(request, items);
     const planId = makeId("plan", binding.sessionId, binding.origin, fields.map((field) => field.fieldHash).join("|"));
-    const pendingPlan = { planId, request, fields, createdAt: now };
+    const pendingPlan = { planId, request, fields, createdAt: now, tabBinding };
     return {
         pendingPlan,
         response: {

@@ -1,4 +1,4 @@
-import { browser, Menus, Runtime } from "webextension-polyfill-ts";
+import { browser, Menus, Runtime, Tabs } from "webextension-polyfill-ts";
 import { setPlatform } from "@padloc/core/src/platform";
 import { App } from "@padloc/core/src/app";
 import { debounce, uuid } from "@padloc/core/src/util";
@@ -21,9 +21,12 @@ import { AutofillBrokerRequest, AutofillBrokerResponse, buildLockedBrokerRespons
 import {
     applyBrokerBundleResponse,
     approveBrokerPlanResponse,
+    BrokerTabBinding,
     buildUnlockedBrokerPlanResponse,
     BrokerApproval,
+    isBrokerTabBindingCurrent,
     mintBrokerBundleResponse,
+    originOf,
     PendingBrokerPlan,
     redactBrokerResponse,
     revokeBrokerBundleResponse,
@@ -833,15 +836,18 @@ async function createContextMenuOnce(
     }
 }
 
-async function getActiveTab() {
+async function getActiveTab(): Promise<Tabs.Tab | null> {
     const [tab] = await browser.tabs.query({ currentWindow: true, active: true });
     return tab || null;
 }
 
-async function getItemsForActiveTab() {
-    const tab = await getActiveTab();
+async function getItemsForTab(tab: Tabs.Tab | null) {
     const application = await getApp();
     return tab && tab.url ? application.getItemsForUrl(tab.url) : [];
+}
+
+async function getItemsForActiveTab() {
+    return getItemsForTab(await getActiveTab());
 }
 
 async function getCountForActiveTab() {
@@ -1066,6 +1072,30 @@ function requireExtensionUiSender(sender: Runtime.MessageSender): string {
     return senderUrl;
 }
 
+function captureBrokerTabBinding(tab: Tabs.Tab | null): BrokerTabBinding | undefined {
+    if (!tab || typeof tab.id !== "number" || !tab.url) return undefined;
+    const origin = originOf(tab.url);
+    return origin ? { tabId: tab.id, origin } : undefined;
+}
+
+/**
+ * Re-checks that the tab bound to `plan` at plan-fill time is still the active
+ * tab and still on the same origin, mirroring `isPasskeyTabStillBound`. Mint and
+ * apply both re-query "the active tab" independently; without this, focus moving
+ * to a different tab mid-flow (plausible given real elapsed time for popup
+ * approval) would source items from, or deliver plaintext credentials into,
+ * whatever tab happens to be active at that later step instead of the tab the
+ * plan/approval were actually scoped to. Fails closed: a missing/failed binding
+ * throws rather than silently allowing the operation.
+ */
+async function assertBrokerTabBindingCurrent(plan: PendingBrokerPlan): Promise<Tabs.Tab> {
+    const tab = await getActiveTab();
+    if (!plan.tabBinding || !tab || !isBrokerTabBindingCurrent(plan.tabBinding, tab)) {
+        throw new Error("Autofill broker tab binding mismatch");
+    }
+    return tab;
+}
+
 async function handleAgenticAutofillBroker(request: AutofillBrokerRequest, application: App) {
     if (application.state.locked || !application.state.loggedIn) {
         return {
@@ -1075,8 +1105,9 @@ async function handleAgenticAutofillBroker(request: AutofillBrokerRequest, appli
     }
 
     if (request.type === "plan-fill" || request.type === "classify") {
-        const items = await getItemsForActiveTab();
-        const { response, pendingPlan } = buildUnlockedBrokerPlanResponse(request, items);
+        const tab = await getActiveTab();
+        const items = await getItemsForTab(tab);
+        const { response, pendingPlan } = buildUnlockedBrokerPlanResponse(request, items, captureBrokerTabBinding(tab));
         pendingAutofillPlans.set(pendingPlan.planId, pendingPlan);
         void publishRedactedBrokerResponse(response);
         return { type: "agenticAutofillBrokerResponse", response };
@@ -1091,7 +1122,8 @@ async function handleAgenticAutofillBroker(request: AutofillBrokerRequest, appli
         const approval = request.approvalId ? pendingAutofillApprovals.get(request.approvalId) : null;
         if (!plan) throw new Error("Autofill bundle plan not found");
         if (!approval) throw new Error("Autofill bundle approval not found");
-        const response = await mintBrokerBundleResponse(request, plan, approval, await getItemsForActiveTab());
+        const tab = await assertBrokerTabBindingCurrent(plan);
+        const response = await mintBrokerBundleResponse(request, plan, approval, await getItemsForTab(tab));
         pendingAutofillApprovals.delete(approval.approvalId);
         const redacted = redactBrokerResponse(response);
         if (response.bundleId) pendingAutofillBundles.set(response.bundleId, response);
@@ -1102,8 +1134,11 @@ async function handleAgenticAutofillBroker(request: AutofillBrokerRequest, appli
     if (request.type === "apply-fill-bundle") {
         const bundle = request.bundleId ? pendingAutofillBundles.get(request.bundleId) : null;
         if (!bundle) throw new Error("Autofill bundle not found");
+        const plan = bundle.planId ? pendingAutofillPlans.get(bundle.planId) : null;
+        if (!plan) throw new Error("Autofill bundle plan not found");
+        const tab = await assertBrokerTabBindingCurrent(plan);
         const response = applyBrokerBundleResponse(request, bundle);
-        await fillActiveTabFromBundle(bundle);
+        await fillActiveTabFromBundle(bundle, tab.id!);
         pendingAutofillBundles.delete(bundle.bundleId || "");
         pendingAutofillPlans.delete(bundle.planId || "");
         void publishRedactedBrokerResponse(response);
@@ -1126,13 +1161,13 @@ async function handleAgenticAutofillBroker(request: AutofillBrokerRequest, appli
     };
 }
 
-async function fillActiveTabFromBundle(bundle: AutofillBrokerResponse): Promise<void> {
+async function fillActiveTabFromBundle(bundle: AutofillBrokerResponse, tabId: number): Promise<void> {
     const bundleFields = bundle.bundleFields || [];
     const mappings = bundleFieldsToMappings(bundleFields);
     if (!Object.values(mappings).some((value) => Boolean(value))) {
         throw new Error("Autofill bundle contains no fillable values");
     }
-    await messageTab({ type: "fillFields", mappings });
+    await messageTab({ type: "fillFields", mappings }, { tabId });
 }
 
 function bundleFieldsToMappings(fields: NonNullable<AutofillBrokerResponse["bundleFields"]>): FieldMappings {

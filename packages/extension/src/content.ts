@@ -117,8 +117,13 @@ class ExtensionContent {
     private _handleMessage(msg: Message) {
         switch (msg.type) {
             case "fillActive":
+                // Defense-in-depth: messageTab() already scopes delivery to frame 0, but
+                // never fill from a nested frame even if some transport path ever delivers
+                // here anyway - a cross-origin iframe must never receive real field values.
+                if (window.self !== window.top) return Promise.resolve(false);
                 return Promise.resolve(this._fill(msg.value));
             case "fillFields":
+                if (window.self !== window.top) return Promise.resolve(false);
                 return Promise.resolve(this._fillFields(msg.mappings));
             // case "fillOnDrop":
             //     // console.log("autofill", msg);

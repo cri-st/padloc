@@ -130,19 +130,37 @@ export type Message =
     | { type: "agenticAutofillBrokerResponse"; response: AutofillBrokerResponse }
     | PasskeyRuntimeRequest;
 
-export async function messageTab(msg: Message) {
-    const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
-    if (activeTab) {
-        const contentReady: boolean = await browser.tabs
-            .sendMessage(activeTab.id!, { type: "isContentReady" })
-            .catch(() => false);
-
-        if (!contentReady) {
-            await browser.tabs.executeScript(activeTab.id, { file: "/content.js" });
-        }
-
-        return browser.tabs.sendMessage(activeTab.id!, msg);
-    } else {
+/**
+ * Delivers `msg` to a tab's content script.
+ *
+ * Always targets frame 0 (the tab's top-level document) explicitly, never the
+ * WebExtensions default of broadcasting to every frame in the tab. Without this,
+ * any cross-origin iframe on the page (ads, embedded widgets) that happens to have
+ * a focused/fillable input receives `fillActive`/`fillFields` payloads meant for
+ * the page the user is actually looking at.
+ *
+ * Pass `tabId` to target a specific, already-verified tab instead of re-querying
+ * "the active tab" at delivery time - required wherever the caller already bound
+ * a plan/approval to a specific tab and must not let a focus change mid-flow
+ * redirect delivery to a different tab.
+ */
+export async function messageTab(msg: Message, opts: { tabId?: number } = {}) {
+    let tabId = opts.tabId;
+    if (typeof tabId !== "number") {
+        const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+        tabId = activeTab?.id;
+    }
+    if (typeof tabId !== "number") {
         return Promise.resolve();
     }
+
+    const contentReady: boolean = await browser.tabs
+        .sendMessage(tabId, { type: "isContentReady" }, { frameId: 0 })
+        .catch(() => false);
+
+    if (!contentReady) {
+        await browser.tabs.executeScript(tabId, { file: "/content.js" });
+    }
+
+    return browser.tabs.sendMessage(tabId, msg, { frameId: 0 });
 }
