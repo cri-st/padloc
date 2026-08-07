@@ -75,6 +75,22 @@ function readFileAsDataURL(blob: File): Promise<string> {
     });
 }
 
+/**
+ * Raw magic bytes ("%PDF-") every valid PDF file starts with. `Attachment.type`
+ * is a client-declared string the zero-knowledge server can never validate, so
+ * anything that gates privileged rendering (e.g. an `<object type="application/pdf">`
+ * embed) must verify it against the actual decrypted bytes first, not trust the
+ * declared type alone.
+ */
+const PDF_MAGIC_BYTES = [0x25, 0x50, 0x44, 0x46, 0x2d];
+
+export function looksLikePdf(data: Uint8Array): boolean {
+    if (data.length < PDF_MAGIC_BYTES.length) {
+        return false;
+    }
+    return PDF_MAGIC_BYTES.every((byte, i) => data[i] === byte);
+}
+
 export type AttachmentID = string;
 
 export class AttachmentInfo extends Serializable {

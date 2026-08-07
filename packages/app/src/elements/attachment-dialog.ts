@@ -1,6 +1,6 @@
 import { translate as $l } from "@padloc/locale/src/translate";
 import { VaultItemID } from "@padloc/core/src/item";
-import { Attachment, AttachmentInfo } from "@padloc/core/src/attachment";
+import { Attachment, AttachmentInfo, looksLikePdf } from "@padloc/core/src/attachment";
 import { saveFile } from "@padloc/core/src/platform";
 import { app } from "../globals";
 import { mixins } from "../styles";
@@ -174,8 +174,17 @@ export class AttachmentDialog extends Dialog<{ info?: AttachmentInfo; file?: Fil
         const mType = mediaType(this.info.type);
 
         switch (mType) {
-            case "pdf":
-                this._objectUrl = await att.toObjectURL();
+            case "pdf": {
+                // `Attachment.type` is fully client-controlled (the server is zero-knowledge and
+                // can't validate it) - never let a declared "application/pdf" alone drive a
+                // privileged <object> embed. Sniff the actual decrypted bytes first and fall back
+                // to the safe "No preview available" download-only presentation if they don't
+                // look like a real PDF.
+                const data = await att.getData();
+                if (!looksLikePdf(data)) {
+                    return null;
+                }
+                this._objectUrl = URL.createObjectURL(new File([data], this.info.name, { type: "application/pdf" }));
                 return html`
                     <object
                         class="content preview pdf stretch"
@@ -183,6 +192,7 @@ export class AttachmentDialog extends Dialog<{ info?: AttachmentInfo; file?: Fil
                         data="${this._objectUrl}"
                     ></object>
                 `;
+            }
             case "image":
                 this._objectUrl = await att.toObjectURL();
                 return html`
