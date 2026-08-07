@@ -4,6 +4,20 @@ import { Serializable, AsBytes } from "./encoding";
 export const PBKDF2_ITER_DEFAULT = 1e6;
 // Maximum number of pbkdf2 iterations
 export const PBKDF2_ITER_MAX = 1e7;
+// Minimum number of pbkdf2 iterations accepted for deriving an authentication
+// verifier or an encryption key from a user's password/secret. Well below
+// PBKDF2_ITER_DEFAULT (so legitimately older/slower clients already enrolled
+// aren't locked out), but high enough that a leaked verifier or ciphertext
+// can't be brute-forced offline for pocket change. NOT enforced inside
+// PBKDF2Params.validate() itself, since that class is also reused by
+// `Index.hashParams` (packages/core/src/app.ts) for a purely local,
+// non-secret hostname-hashing index that intentionally uses iterations: 1 for
+// speed - use `isSecurePBKDF2Params()` at every real authentication/
+// key-derivation boundary instead.
+export const PBKDF2_ITER_MIN = 1e5;
+// Minimum accepted salt length (bytes) for the same authentication/
+// key-derivation boundaries.
+export const PBKDF2_SALT_MIN_LENGTH = 8;
 
 export type AESKey = Uint8Array;
 export type HMACKey = Uint8Array;
@@ -91,6 +105,21 @@ export class PBKDF2Params extends Serializable {
             this.salt instanceof Uint8Array
         );
     }
+}
+
+/**
+ * Verifies that `params` meet the minimum security floor for deriving an
+ * authentication verifier or an encryption key from a user's password/secret -
+ * a malicious or compromised client could otherwise set `iterations: 1` and an
+ * empty salt, making an eventual leaked verifier/ciphertext trivially
+ * brute-forceable offline. Callers MUST call this explicitly wherever
+ * client-supplied `PBKDF2Params` are accepted for such a purpose (e.g.
+ * `Server.createAccount`/`updateAuth`/`updateAccount`/`recoverAccount`) -
+ * `PBKDF2Params.validate()` itself only checks structural well-formedness,
+ * since it's shared with non-secret uses that need a low iteration count.
+ */
+export function isSecurePBKDF2Params(params: PBKDF2Params): boolean {
+    return params.iterations >= PBKDF2_ITER_MIN && params.salt.length >= PBKDF2_SALT_MIN_LENGTH;
 }
 
 export class RSAEncryptionParams extends Serializable {

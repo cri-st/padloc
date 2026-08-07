@@ -17,6 +17,7 @@ import { Client } from "@padloc/core/src/client";
 import { Account } from "@padloc/core/src/account";
 import { Auth } from "@padloc/core/src/auth";
 import { Client as SRPClient } from "@padloc/core/src/srp";
+import { PBKDF2_ITER_MIN } from "@padloc/core/src/crypto";
 import {
     Sender,
     Request as TransportRequest,
@@ -72,7 +73,7 @@ async function createAccount(email: string, password: string): Promise<void> {
     const account = new Account();
     account.email = email;
     account.name = email.split("@")[0];
-    account.keyParams.iterations = 1000;
+    account.keyParams.iterations = PBKDF2_ITER_MIN;
     await account.initialize(password);
 
     const auth = new Auth(email);

@@ -57,6 +57,7 @@ import {
     Messenger,
 } from "./messenger";
 import { Server as SRPServer, SRPSession } from "./srp";
+import { isSecurePBKDF2Params } from "./crypto";
 import { DeviceInfo, getCryptoProvider } from "./platform";
 import { getIdFromEmail, uuid, removeTrailingSlash } from "./util";
 import { loadLanguage, translate as $l } from "@padloc/locale/src/translate";
@@ -640,6 +641,12 @@ export class Controller extends API {
         }
 
         if (keyParams) {
+            if (!isSecurePBKDF2Params(keyParams)) {
+                throw new Err(
+                    ErrorCode.BAD_REQUEST,
+                    "The provided key derivation parameters do not meet the minimum security requirements."
+                );
+            }
             auth.keyParams = keyParams;
         }
 
@@ -994,6 +1001,13 @@ export class Controller extends API {
             throw new Err(ErrorCode.ACCOUNT_EXISTS, "This account already exists!");
         }
 
+        if (!isSecurePBKDF2Params(keyParams)) {
+            throw new Err(
+                ErrorCode.BAD_REQUEST,
+                "The provided key derivation parameters do not meet the minimum security requirements."
+            );
+        }
+
         // Most of the account object is constructed locally but account id and
         // revision are exclusively managed by the server
         account.id = await uuid();
@@ -1088,6 +1102,13 @@ export class Controller extends API {
             throw new Err(ErrorCode.OUTDATED_REVISION);
         }
 
+        if (keyParams && !isSecurePBKDF2Params(keyParams)) {
+            throw new Err(
+                ErrorCode.BAD_REQUEST,
+                "The provided key derivation parameters do not meet the minimum security requirements."
+            );
+        }
+
         // Update revision id
         account.revision = await uuid();
 
@@ -1176,6 +1197,13 @@ export class Controller extends API {
 
         // Fetch existing account
         const account = await this.storage.get(Account, auth.account);
+
+        if (!isSecurePBKDF2Params(keyParams) || !isSecurePBKDF2Params(authKeyParams)) {
+            throw new Err(
+                ErrorCode.BAD_REQUEST,
+                "The provided key derivation parameters do not meet the minimum security requirements."
+            );
+        }
 
         // Update account object
         Object.assign(account, { email, publicKey, keyParams, encryptionParams, encryptedData });

@@ -12,13 +12,13 @@ import { MemoryStorage } from "@padloc/core/src/storage";
 import { Account } from "@padloc/core/src/account";
 import { Auth } from "@padloc/core/src/auth";
 import { Client as SRPClient } from "@padloc/core/src/srp";
-import { PBKDF2Params } from "@padloc/core/src/crypto";
+import { PBKDF2Params, PBKDF2_ITER_MIN } from "@padloc/core/src/crypto";
 import { Request, Response } from "@padloc/core/src/transport";
 import { Session } from "@padloc/core/src/session";
 import { Vault } from "@padloc/core/src/vault";
 import { Org } from "@padloc/core/src/org";
 
-const TEST_ITERATIONS = 10000;
+const TEST_ITERATIONS = PBKDF2_ITER_MIN;
 
 setPlatform({
     crypto: new WorkerCryptoProvider(),
